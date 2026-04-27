@@ -31,7 +31,9 @@ target_include_directories(fastbitcopy_ci PRIVATE
 if(MSVC)
     target_compile_options(fastbitcopy_ci PRIVATE /FI"ue_shim.h" /W4 /permissive-)
 else()
-    target_compile_options(fastbitcopy_ci PRIVATE -include ue_shim.h -Wall -Wextra)
+    # -fno-strict-aliasing matches what UBT passes to GCC/Clang; without it,
+    # BitCopyFast.cpp's uint8*/uint64* aliasing is UB and gets DCE'd on -O2.
+    target_compile_options(fastbitcopy_ci PRIVATE -include ue_shim.h -Wall -Wextra -fno-strict-aliasing)
 endif()
 
 # Optimize hard on Release so bench numbers mean something.
