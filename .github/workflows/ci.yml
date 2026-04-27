@@ -65,6 +65,27 @@ jobs:
       - name: Run correctness + micro-benchmark
         run: ctest --test-dir CI/build --output-on-failure -C Release
 
+  # Extra Linux job with UBSan/ASan to catch undefined behavior in the
+  # algorithm. Separate so a UB hit doesn't mask a plain correctness issue.
+  sanitizers:
+    name: Sanitizers (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure with UBSan+ASan
+        run: |
+          cmake -S CI -B CI/build-san \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS="-fsanitize=undefined,address -fno-omit-frame-pointer -g" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=undefined,address"
+      - name: Build
+        run: cmake --build CI/build-san -j
+      - name: Run under sanitizers
+        env:
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+          ASAN_OPTIONS: detect_leaks=0:halt_on_error=1
+        run: ctest --test-dir CI/build-san --output-on-failure
+
   # ---------------------------------------------------------------------------
   # 3) Cross-compile the core algorithm for arm64 on Linux, to make sure
   #    BitCopyFast.cpp still compiles cleanly for the ARM target supported

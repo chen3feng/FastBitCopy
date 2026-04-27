@@ -232,6 +232,25 @@ int main()
     std::printf("[info] PLATFORM_SUPPORTS_UNALIGNED_LOADS = %d\n",
                 (int)PLATFORM_SUPPORTS_UNALIGNED_LOADS);
 
+    // Smoke test: byte-aligned 8-bit copy. If the function writes anything
+    // at all, tmp[0] must end up 0xFF. A result of 0x00 means the optimized
+    // store path has been eliminated by the compiler somewhere.
+    {
+        uint8 tmp[16] = {0};
+        uint8 src[16];
+        std::memset(src, 0xFF, sizeof(src));
+        appBitsCpyFastImpl(tmp, 0, src, 0, 8);
+        std::printf("[info] smoke(aligned): tmp[0]=0x%02X (expect 0xFF)\n", tmp[0]);
+    }
+    {
+        uint8 tmp[16] = {0};
+        uint8 src[16];
+        std::memset(src, 0xFF, sizeof(src));
+        appBitsCpyFastImpl(tmp, 5, src, 3, 64);
+        std::printf("[info] smoke(unaligned 5/3 64b): tmp[0..4]=%02X %02X %02X %02X %02X\n",
+                    tmp[0], tmp[1], tmp[2], tmp[3], tmp[4]);
+    }
+
     std::mt19937 Rng(0xC0FFEEu);
     int rc = RunCorrectness(Rng);
     RunBench(Rng);
