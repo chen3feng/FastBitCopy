@@ -48,21 +48,21 @@ x86-64 and arm64 we can do much better with aligned 64-bit loads/stores plus
 
 |            | Windows | Linux | macOS |
 |------------|:-------:|:-----:|:-----:|
-| **x86-64** |   ✅    |  ⚠️   |  ⚠️   |
-| **arm64**  |   ✅    |  ⚠️   |  ⚠️ (Apple Silicon) |
+| **x86-64** |   ✅    |  🟡   |  🟡   |
+| **arm64**  |   ✅    |  🟡   |  🟡 (Apple Silicon) |
 
 Requires a little-endian CPU that allows unaligned loads
 (`PLATFORM_LITTLE_ENDIAN && PLATFORM_SUPPORTS_UNALIGNED_LOADS`). Both x64
 and arm64 qualify.
 
-> **⚠️ Known issue** — the optimized algorithm currently miscompiles under
-> GCC/Clang at `-O2` (Linux and macOS). MSVC (Windows) is fully validated
-> against 20 000 random trials and 11 deterministic edge cases. The
-> algorithm is logically correct (Linux/mac at `-O0` pass), so this is an
-> undefined-behaviour / dataflow-optimization interaction that we are
-> still tracking. Do **not** ship this plugin on Linux/macOS until the
-> issue is resolved. See
-> [#2](https://github.com/chen3feng/FastBitCopy/issues/2) for progress.
+> **🟡 Partial optimization on Linux/macOS** — on Windows (MSVC) both the
+> byte-aligned and bit-unaligned paths use the optimized implementation
+> (~30× / ~5×). On Linux (GCC) and macOS (Clang) at `-O2`, only the
+> byte-aligned path is optimized; the bit-unaligned path falls back to
+> UE's stock `appBitsCpy` because of a compiler optimization interaction
+> we are still tracking. See
+> [#2](https://github.com/chen3feng/FastBitCopy/issues/2). Behaviour is
+> always correct — the worst case is "as fast as stock UE".
 
 ## Installation
 

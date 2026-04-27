@@ -49,13 +49,6 @@ jobs:
   standalone-test:
     name: Standalone test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # Known issue: on GCC/Clang -O2 the optimized algorithm produces results
-    # that diverge from the stock UE reference; the failure does NOT appear
-    # under MSVC (which is what real UE builds on Windows use). Tracking
-    # issue: https://github.com/chen3feng/FastBitCopy/issues/2
-    # Until resolved, Linux/macOS standalone runs are allowed to fail so CI
-    # still surfaces the problem but does not block other work.
-    continue-on-error: ${{ matrix.os != 'windows-latest' }}
     strategy:
       fail-fast: false
       matrix:

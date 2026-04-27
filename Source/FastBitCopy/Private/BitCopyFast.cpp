@@ -323,7 +323,20 @@ void appBitsCpyFastImpl(uint8* Dest, int32 DestBit, uint8* Src, int32 SrcBit, in
 		BitsCopyFastAligned(Dest, Src, SrcBit, BitCount);
 		return;
 	}
+
+	// Known issue: on GCC/Clang -O2 the unaligned fast path miscompiles in
+	// a way we have not yet fully diagnosed (appears to be a DCE / spill
+	// interaction with the template-instantiated CopyBitsSrcAligned<uint64>
+	// being inlined here). See
+	// https://github.com/chen3feng/FastBitCopy/issues/2 . Until that is
+	// resolved, fall back to the stock UE reference on non-MSVC builds
+	// *only* for the unaligned case. The aligned path is unaffected and
+	// still gives the full ~30x speedup on every supported platform.
+#if defined(_MSC_VER)
 	BitsCopyFastUnaligned(Dest, DestBit, Src, SrcBit, BitCount);
+#else
+	OriginalAppBitsCpy(Dest, DestBit, Src, SrcBit, BitCount);
+#endif
 }
 
 // Build-path self-identification probe (used by the CI harness to confirm
