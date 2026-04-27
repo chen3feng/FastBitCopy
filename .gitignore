@@ -1,0 +1,24 @@
+# ---- UE build artifacts ----
+Binaries/
+Build/
+DerivedDataCache/
+Intermediate/
+Saved/
+*.sln
+*.suo
+*.xcodeproj/
+*.xcworkspace/
+
+# ---- CI standalone harness build output ----
+CI/build/
+CI/build-*/
+
+# ---- Editor / IDE ----
+.vs/
+.vscode/
+.idea/
+*.user
+
+# ---- OS junk ----
+.DS_Store
+Thumbs.db

@@ -1,7 +1,8 @@
 # FastBitCopy — UE 插件
 
-[English](README.md) | [中文](README_CN.md)
+[![CI](https://github.com/chen3feng/FastBitCopy/actions/workflows/ci.yml/badge.svg)](https://github.com/chen3feng/FastBitCopy/actions/workflows/ci.yml)
 
+[English](README.md) | [中文](README_CN.md)
 **FastBitCopy** 通过一套跨平台的运行时函数 Hook，将 UE 中的
 `appBitsCpy`（被 `FBitReader` / `FBitWriter`、网络同步、序列化等大量调用）
 替换为高度优化的实现。**无需修改引擎源码，放进 `Plugins/` 即生效**。
