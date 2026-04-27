@@ -215,8 +215,23 @@ void RunBench(std::mt19937& Rng)
 
 } // namespace
 
+// Forward declaration for the probe defined in BitCopyFast.cpp.
+int FastBitCopy_IsOptimizedBuild();
+
 int main()
 {
+    std::setbuf(stdout, nullptr);
+    std::setbuf(stderr, nullptr);
+
+    // Confirm which build path we're on. Also exposes a self-check of the
+    // ue_shim platform macros.
+    std::printf("[info] FastBitCopy_IsOptimizedBuild = %d\n",
+                FastBitCopy_IsOptimizedBuild());
+    std::printf("[info] PLATFORM_LITTLE_ENDIAN = %d\n",
+                (int)PLATFORM_LITTLE_ENDIAN);
+    std::printf("[info] PLATFORM_SUPPORTS_UNALIGNED_LOADS = %d\n",
+                (int)PLATFORM_SUPPORTS_UNALIGNED_LOADS);
+
     std::mt19937 Rng(0xC0FFEEu);
     int rc = RunCorrectness(Rng);
     RunBench(Rng);

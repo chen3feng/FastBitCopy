@@ -267,6 +267,10 @@ void appBitsCpyFastImpl(uint8* Dest, int32 DestBit, uint8* Src, int32 SrcBit, in
 	BitsCopyFastUnaligned(Dest, DestBit, Src, SrcBit, BitCount);
 }
 
+// Build-path self-identification probe (used by the CI harness to confirm
+// we're on the optimized path, not the fallback).
+CORE_API int FastBitCopy_IsOptimizedBuild() { return 1; }
+
 #else // !PLATFORM_LITTLE_ENDIAN || !PLATFORM_SUPPORTS_UNALIGNED_LOADS
 
 // Fallback: just forward to UE's implementation by declaring it and calling through.
@@ -281,5 +285,7 @@ void OriginalAppBitsCpyForTest(uint8* Dest, int32 DestBit, uint8* Src, int32 Src
 {
 	appBitsCpy(Dest, DestBit, Src, SrcBit, BitCount);
 }
+
+CORE_API int FastBitCopy_IsOptimizedBuild() { return 0; }
 
 #endif
