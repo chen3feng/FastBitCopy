@@ -217,7 +217,17 @@ static FASTBITCOPY_NOINLINE void BitsCopyFastUnaligned(uint8 *Dest, int DestBit,
 // ----------------------------------------------------------------------------
 // Original appBitsCpy (kept verbatim for benchmarking & as a fallback reference)
 // ----------------------------------------------------------------------------
-static FORCEINLINE void OriginalAppBitsCpy(uint8* Dest, int32 DestBit, uint8* Src, int32 SrcBit, int32 BitCount)
+// NOTE: we deliberately do NOT FORCEINLINE this on GCC/Clang. Inlining it
+// into appBitsCpyFastImpl turned out to expose a codegen bug on Linux
+// GCC -O2 (see issue #2 / uninitialised-stack-slot analysis) that
+// manifested as a SegFault in CI when we used this function as the
+// non-MSVC fallback for the unaligned path.
+#if defined(_MSC_VER)
+#define FASTBITCOPY_ORIG_INLINE FORCEINLINE
+#else
+#define FASTBITCOPY_ORIG_INLINE FASTBITCOPY_NOINLINE
+#endif
+static FASTBITCOPY_ORIG_INLINE void OriginalAppBitsCpy(uint8 *Dest, int32 DestBit, uint8 *Src, int32 SrcBit, int32 BitCount)
 {
 	if (BitCount <= 8)
 	{

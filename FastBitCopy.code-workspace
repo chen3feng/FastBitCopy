@@ -5,6 +5,9 @@
 		},
 		{
 			"path": "../UnrealEngine"
+		},
+		{
+			"path": "../agent-skills"
 		}
 	],
 	"settings": {}
