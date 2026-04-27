@@ -7,6 +7,7 @@
 #include "BitCopyFast.h"
 #include "CoreMinimal.h"
 #include "Math/UnrealMathUtility.h"
+#include <atomic>
 
 #if PLATFORM_LITTLE_ENDIAN && PLATFORM_SUPPORTS_UNALIGNED_LOADS
 
@@ -176,6 +177,11 @@ static void BitsCopyFastUnaligned(uint8* Dest, int DestBit, uint8* Src, int SrcB
 		++Src;
 		SrcBit = 0;
 	}
+	// Compiler barrier: GCC/Clang otherwise aggressively elide our uint8*
+	// stores above on the assumption they don't alias the uint64* reads that
+	// follow. This is a pure compile-time fence (no runtime cost) that
+	// forces the compiler to keep them.
+	std::atomic_signal_fence(std::memory_order_seq_cst);
 	CopyBitsSrcAligned((uint64*)Dest, DestBit, (uint64*)Src, BitCount);
 }
 
