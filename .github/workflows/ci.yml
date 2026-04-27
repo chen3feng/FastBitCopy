@@ -117,6 +117,34 @@ jobs:
         run: ctest --test-dir CI/build-san --output-on-failure
 
   # ---------------------------------------------------------------------------
+  # Diagnostic job: compile BitCopyFast.cpp to assembly on Linux -O2 and
+  # upload it as an artifact, so we can inspect whether the optimizer is
+  # actually generating the uint8* stores we expect.
+  # ---------------------------------------------------------------------------
+  dump-asm:
+    name: Dump -O2 assembly (linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile BitCopyFast.cpp to assembly
+        run: |
+          mkdir -p asm-out
+          g++ -S -O2 -fno-strict-aliasing -std=c++17 \
+            -ICI -ICI/compat -ISource/FastBitCopy/Public \
+            -include CI/ue_shim.h \
+            Source/FastBitCopy/Private/BitCopyFast.cpp \
+            -o asm-out/BitCopyFast.s
+          echo "--- first 200 lines of BitsCopyFastUnaligned region ---"
+          grep -n 'BitsCopyFastUnaligned\|appBitsCpyFastImpl\|CopyBitsSrcAligned' asm-out/BitCopyFast.s | head -n 40 || true
+          echo "--- total line count ---"
+          wc -l asm-out/BitCopyFast.s
+      - name: Upload assembly artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BitCopyFast-linux-O2-asm
+          path: asm-out/BitCopyFast.s
+
+  # ---------------------------------------------------------------------------
   # 3) Cross-compile the core algorithm for arm64 on Linux, to make sure
   #    BitCopyFast.cpp still compiles cleanly for the ARM target supported
   #    by the plugin. We only build (can't execute without qemu), which

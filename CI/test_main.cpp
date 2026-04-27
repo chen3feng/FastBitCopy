@@ -265,6 +265,26 @@ int main()
                     tmp[0], tmp[1], tmp[2], tmp[3], tmp[4]);
     }
 
+    // Heap-based repro of the same unaligned smoke. If this reproduces the
+    // Linux -O2 "nothing was written" behaviour seen on the stack version,
+    // the bug is truly inside appBitsCpyFastImpl. If it does NOT reproduce,
+    // the bug is specifically a stack-escape / no-address-taken analysis
+    // issue that only affects short-lived local arrays.
+    {
+        auto *tmp = new uint8[32];
+        std::memset(tmp, 0xA5, 32);
+        auto *src = new uint8[32];
+        const uint8 src_bytes[] = {0x92, 0x8C, 0xD0, 0x24, 0xED, 0xA6, 0x00, 0x00, 0};
+        std::memcpy(src, src_bytes, sizeof(src_bytes));
+        appBitsCpyFastImpl(tmp, 5, src, 3, 64);
+        // Also dump via volatile reads to prevent any post-call DCE.
+        volatile uint8 v0 = tmp[0], v1 = tmp[1], v2 = tmp[2], v3 = tmp[3], v4 = tmp[4];
+        std::printf("[info] smoke(HEAP sentinel): tmp[0..4]=%02X %02X %02X %02X %02X (expect 45 32 42 93 ..)\n",
+                    (unsigned)v0, (unsigned)v1, (unsigned)v2, (unsigned)v3, (unsigned)v4);
+        delete[] tmp;
+        delete[] src;
+    }
+
     std::mt19937 Rng(0xC0FFEEu);
     int rc = RunCorrectness(Rng);
     RunBench(Rng);
