@@ -61,13 +61,29 @@ static void CopyBitsSrcAligned(WordType* Dest, int DestBit, WordType* Src, int B
 	}
 	if (LoopCount > 0)
 	{
-		for (int i = 0; i < LoopCount; ++i)
+		// Fast path: DestBit == 0 means both Src and Dest are word-aligned at
+		// this point, so we can just memcpy the middle words. This also
+		// dodges the shift-by-BitsPerWord that the generic loop below would
+		// otherwise perform (`Word >> DestCopyBits` with DestCopyBits ==
+		// BitsPerWord is UB in C/C++, and Clang/GCC do not silently fold it
+		// to zero the way MSVC does).
+		if (DestBit == 0)
 		{
-			WordType Word = Src[i];
-			Dest[i] &= ~Mask;                            // Clear high bits
-			Dest[i] |= Word << DestBit;                  // Set high bits
-			Dest[i + 1] &= Mask;                         // Clear low bits
-			Dest[i + 1] |= Word >> uint32(DestCopyBits); // Set low bits
+			for (int i = 0; i < LoopCount; ++i)
+			{
+				Dest[i] = Src[i];
+			}
+		}
+		else
+		{
+			for (int i = 0; i < LoopCount; ++i)
+			{
+				WordType Word = Src[i];
+				Dest[i] &= ~Mask;							 // Clear high bits
+				Dest[i] |= Word << DestBit;					 // Set high bits
+				Dest[i + 1] &= Mask;						 // Clear low bits
+				Dest[i + 1] |= Word >> uint32(DestCopyBits); // Set low bits
+			}
 		}
 		Src += LoopCount;
 		Dest += LoopCount;
