@@ -41,7 +41,7 @@
 #if PLATFORM_LITTLE_ENDIAN && PLATFORM_SUPPORTS_UNALIGNED_LOADS
 
 // Copy bits when BitOffset of Src and Dest are same.
-static void BitsCopyFastAligned(uint8* Dest, uint8* Src, int BitOffset, int BitCount)
+static FASTBITCOPY_NOINLINE void BitsCopyFastAligned(uint8 *Dest, uint8 *Src, int BitOffset, int BitCount)
 {
 	// Copy leading bits: Align to byte boundary
 	if (BitOffset != 0)
@@ -79,7 +79,7 @@ static void BitsCopyFastAligned(uint8* Dest, uint8* Src, int BitOffset, int BitC
 
 // Copy bits with source bit offset aligned.
 template <typename WordType>
-static void CopyBitsSrcAligned(WordType* Dest, int DestBit, WordType* Src, int BitCount)
+static FASTBITCOPY_NOINLINE void CopyBitsSrcAligned(WordType *Dest, int DestBit, WordType *Src, int BitCount)
 {
 	// Handle middle words
 	const int BitsPerWord = sizeof(WordType) * 8;
