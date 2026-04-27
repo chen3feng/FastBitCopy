@@ -19,10 +19,13 @@ static void BitsCopyFastAligned(uint8* Dest, uint8* Src, int BitOffset, int BitC
 		int SrcCopyBits = 8 - BitOffset;
 		int CopyBits = FMath::Min(SrcCopyBits, BitCount);
 		BitCount -= CopyBits;
-		uint8 Mask = (0xFF << BitOffset) & (0xFF >> uint32(SrcCopyBits - CopyBits));
-		uint8 Word = *Src & Mask;
-		*Dest &= ~Mask; // Clear dest
-		*Dest |= Word;  // Copy bits
+		// NOTE: SrcCopyBits - CopyBits is in [0, 7]. Cast both to int to avoid
+		// accidental unsigned promotion producing a huge shift count on
+		// GCC/Clang.
+		const int TailShift = SrcCopyBits - CopyBits;
+		uint8 Mask = uint8((uint32(0xFF) << BitOffset) & (uint32(0xFF) >> uint32(TailShift)));
+		uint8 Word = uint8(*Src & Mask);
+		*Dest = uint8((*Dest & ~Mask) | Word);
 		Dest += (CopyBits + BitOffset) / 8;
 		++Src;
 	}
@@ -37,10 +40,10 @@ static void BitsCopyFastAligned(uint8* Dest, uint8* Src, int BitOffset, int BitC
 	{
 		uint8* SrcB = (uint8*)Src + NumBytes;
 		uint8* DestB = (uint8*)Dest + NumBytes;
-		uint8 Mask = 0xFF >> uint32(8 - BitCount);
-		uint8 SrcBits = *SrcB & Mask;
-		*DestB &= ~Mask;
-		*DestB |= SrcBits;
+		// BitCount is in [1, 7] here, so 8 - BitCount is in [1, 7]. Safe.
+		uint8 Mask = uint8(uint32(0xFF) >> uint32(8 - BitCount));
+		uint8 SrcBits = uint8(*SrcB & Mask);
+		*DestB = uint8((*DestB & ~Mask) | SrcBits);
 	}
 }
 
@@ -51,8 +54,8 @@ static void CopyBitsSrcAligned(WordType* Dest, int DestBit, WordType* Src, int B
 	// Handle middle words
 	const int BitsPerWord = sizeof(WordType) * 8;
 	const WordType AllOnes = ~WordType(0);
-	int DestCopyBits = BitsPerWord - DestBit;
-	WordType Mask = AllOnes << DestBit;
+	const int DestCopyBits = BitsPerWord - DestBit;
+	const WordType Mask = WordType(AllOnes << uint32(DestBit));
 	int LoopCount = BitCount / BitsPerWord;
 	// For any type larger than 1 byte, the last word is not guaranteed to be accessible
 	if (sizeof(WordType) > 1)
@@ -76,13 +79,13 @@ static void CopyBitsSrcAligned(WordType* Dest, int DestBit, WordType* Src, int B
 		}
 		else
 		{
+			const uint32 UDestBit = uint32(DestBit);
+			const uint32 UDestCopyBits = uint32(DestCopyBits);
 			for (int i = 0; i < LoopCount; ++i)
 			{
-				WordType Word = Src[i];
-				Dest[i] &= ~Mask;							 // Clear high bits
-				Dest[i] |= Word << DestBit;					 // Set high bits
-				Dest[i + 1] &= Mask;						 // Clear low bits
-				Dest[i + 1] |= Word >> uint32(DestCopyBits); // Set low bits
+				const WordType Word = Src[i];
+				Dest[i] = WordType((Dest[i] & ~Mask) | WordType(Word << UDestBit));
+				Dest[i + 1] = WordType((Dest[i + 1] & Mask) | WordType(Word >> UDestCopyBits));
 			}
 		}
 		Src += LoopCount;
@@ -95,20 +98,22 @@ static void CopyBitsSrcAligned(WordType* Dest, int DestBit, WordType* Src, int B
 	{
 		if (sizeof(WordType) == 1)
 		{
-			Mask = AllOnes >> (BitsPerWord - BitCount);
-			WordType Word = *Src & Mask;
-			WordType CopyBits = FMath::Min(BitCount, DestCopyBits);
-			Mask = (AllOnes << DestBit) & (AllOnes >> uint32(DestCopyBits - CopyBits));
-			*Dest &= ~Mask;
-			*Dest |= Word << DestBit;
+			// BitCount is in [1, BitsPerWord] = [1, 8] here.
+			const int HeadTailShift = BitsPerWord - BitCount; // [0, 7]
+			WordType TailMask = WordType(AllOnes >> uint32(HeadTailShift));
+			const WordType Word = WordType(*Src & TailMask);
+			const int CopyBits = FMath::Min(BitCount, DestCopyBits); // [1, 8]
+			const int TailShift2 = DestCopyBits - CopyBits;			 // [0, 7]
+			TailMask = WordType((AllOnes << uint32(DestBit)) & (AllOnes >> uint32(TailShift2)));
+			*Dest = WordType((*Dest & ~TailMask) | WordType(Word << uint32(DestBit)));
 			Dest += (CopyBits + DestBit) / BitsPerWord;
 			DestBit = (CopyBits + DestBit) % BitsPerWord;
 			BitCount -= CopyBits;
 			if (BitCount > 0)
 			{
-				Mask = AllOnes >> uint32(BitsPerWord - BitCount);
-				*Dest &= ~Mask;
-				*Dest |= Word >> CopyBits;
+				// BitCount is in [1, 7] here.
+				TailMask = WordType(AllOnes >> uint32(BitsPerWord - BitCount));
+				*Dest = WordType((*Dest & ~TailMask) | WordType(Word >> uint32(CopyBits)));
 				DestBit = BitCount;
 			}
 		}
@@ -127,28 +132,46 @@ static void BitsCopyFastUnaligned(uint8* Dest, int DestBit, uint8* Src, int SrcB
 	// Align SrcBit to 0
 	if (SrcBit != 0)
 	{
-		int CopySrcBits = 8 - SrcBit;
-		int CopyBits = FMath::Min(CopySrcBits, BitCount);
+		const int CopySrcBits = 8 - SrcBit;						// [1, 7]
+		const int CopyBits = FMath::Min(CopySrcBits, BitCount); // [1, 7]
 		BitCount -= CopyBits;
-		uint8 Mask = (0xFF << SrcBit) & (0xFF >> uint32(CopySrcBits - CopyBits));
-		uint8 Word = *Src & Mask;
-		int DestCopyBits = 8 - DestBit;
-		uint32 OverlappedBits = FMath::Min(CopyBits, DestCopyBits);
-		Mask = (0xFF << DestBit) & (0xFF >> uint32(DestCopyBits - OverlappedBits));
-		*Dest &= ~Mask;
-		if (DestBit > SrcBit)
-			*Dest |= Word << (DestBit - SrcBit);
+		// Both shift amounts are in [0, 7] here.
+		const int PreMaskTailShift = CopySrcBits - CopyBits; // [0, 6]
+		uint8 Mask = uint8((uint32(0xFF) << SrcBit) & (uint32(0xFF) >> uint32(PreMaskTailShift)));
+		const uint8 Word = uint8(*Src & Mask);
+
+		const int DestCopyBits = 8 - DestBit;						   // [1, 8]
+		const int OverlappedBits = FMath::Min(CopyBits, DestCopyBits); // [0, 7]
+		const int DestTailShift = DestCopyBits - OverlappedBits;	   // [0, 7]
+		Mask = uint8((uint32(0xFF) << DestBit) & (uint32(0xFF) >> uint32(DestTailShift)));
+
+		// Shift Word from its SrcBit position to the DestBit position. The
+		// shift count is in [-7, 7] but we always reduce it to a non-negative
+		// left OR right shift. Using uint32 intermediates keeps the shift
+		// well-defined on all platforms (no implicit int promotion weirdness).
+		uint32 Shifted;
+		if (DestBit >= SrcBit)
+		{
+			Shifted = uint32(Word) << uint32(DestBit - SrcBit);
+		}
 		else
-			*Dest |= Word >> (SrcBit - DestBit);
+		{
+			Shifted = uint32(Word) >> uint32(SrcBit - DestBit);
+		}
+		*Dest = uint8((*Dest & ~Mask) | (uint8(Shifted) & Mask));
+
 		Dest += (OverlappedBits + DestBit) / 8;
 		DestBit = (OverlappedBits + DestBit) % 8;
-		CopyBits -= OverlappedBits;
-		if (CopyBits > 0)
+
+		int RemainingBits = CopyBits - OverlappedBits; // [0, 7]
+		if (RemainingBits > 0)
 		{
-			Mask = 0xFF >> (8 - CopyBits);
-			*Dest &= ~Mask;
-			*Dest |= Word >> uint32(SrcBit + OverlappedBits);
-			DestBit = CopyBits;
+			// RemainingBits is in [1, 7], so (8 - RemainingBits) is in [1, 7].
+			Mask = uint8(uint32(0xFF) >> uint32(8 - RemainingBits));
+			const uint32 TailShift = uint32(SrcBit) + uint32(OverlappedBits); // [1, 14], but Word's top bit is at position 7
+			const uint8 TailBits = uint8(uint32(Word) >> TailShift);
+			*Dest = uint8((*Dest & ~Mask) | (TailBits & Mask));
+			DestBit = RemainingBits;
 		}
 		++Src;
 		SrcBit = 0;
