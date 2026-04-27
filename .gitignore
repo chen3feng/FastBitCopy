@@ -22,3 +22,6 @@ CI/build-*/
 # ---- OS junk ----
 .DS_Store
 Thumbs.db
+  
+# Agent scratch directory (local only, never committed)  
+.agent/  
