@@ -40,16 +40,17 @@
 
 // Per-function optimization override. On GCC/Clang at -O2 we have observed
 // miscompilations in this translation unit (uninitialised-stack-slot loads
-// in the generated assembly; see #2). Compiling the hot helpers at -O1
-// sidesteps the problematic optimizer passes while still giving the bulk
-// of the speedup: the inner loop is memcpy in the aligned case and a
-// tight shift+OR loop in the unaligned case, both of which GCC already
-// vectorises at -O1. On MSVC (where we have no miscompilation) we stay at
-// the project-level /O2.
+// in the generated assembly; see #2). Compile the hot helpers at -O0
+// (which we *know* produces correct code from the -O0 CI jobs), while the
+// rest of the translation unit stays at the project-level -O2. The inner
+// loops are still a single memcpy in the aligned case; the unaligned
+// case loses some of its vectorisation but the rest of this TU (the
+// Original* reference and the hook plumbing) can still be optimized
+// normally.
 #if defined(__clang__)
 #define FASTBITCOPY_SAFE_OPT __attribute__((optnone))
 #elif defined(__GNUC__)
-#define FASTBITCOPY_SAFE_OPT __attribute__((optimize("O1")))
+#define FASTBITCOPY_SAFE_OPT __attribute__((optimize("O0")))
 #else
 #define FASTBITCOPY_SAFE_OPT
 #endif
