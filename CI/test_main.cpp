@@ -101,6 +101,20 @@ namespace
                 std::fprintf(stderr,
                              "[FAIL] edge '%s' DestBit=%d SrcBit=%d BitCount=%d\n",
                              C.Tag, C.DestBit, C.SrcBit, C.BitCount);
+                int FirstByte = C.DestBit / 8;
+                int LastByte = (C.DestBit + C.BitCount + 7) / 8;
+                int Diffs = 0;
+                for (int i = FirstByte; i < LastByte && Diffs < 4; ++i)
+                {
+                    if (B.DstFast[i] != B.DstRef[i])
+                    {
+                        std::fprintf(stderr,
+                                     "       byte[%d]: fast=0x%02X ref=0x%02X src[%d]=0x%02X src[%d]=0x%02X\n",
+                                     i, B.DstFast[i], B.DstRef[i],
+                                     i, B.Src[i], i + 1, B.Src[i + 1]);
+                        ++Diffs;
+                    }
+                }
             }
         }
         if (failures == 0)
