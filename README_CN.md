@@ -1,7 +1,8 @@
 # FastBitCopy — UE 插件
 
-[English](README.md) | [中文](README_CN.md)
+[![CI](https://github.com/chen3feng/FastBitCopy/actions/workflows/ci.yml/badge.svg)](https://github.com/chen3feng/FastBitCopy/actions/workflows/ci.yml)
 
+[English](README.md) | [中文](README_CN.md)
 **FastBitCopy** 通过一套跨平台的运行时函数 Hook，将 UE 中的
 `appBitsCpy`（被 `FBitReader` / `FBitWriter`、网络同步、序列化等大量调用）
 替换为高度优化的实现。**无需修改引擎源码，放进 `Plugins/` 即生效**。
@@ -49,11 +50,19 @@ UE 自带的 `appBitsCpy` 是逐字节处理的标量实现。在 x86-64 与 arm
 
 |            | Windows | Linux | macOS |
 |------------|:-------:|:-----:|:-----:|
-| **x86-64** |   ✅    |  ✅   |  ✅   |
-| **arm64**  |   ✅    |  ✅   |  ✅（Apple Silicon） |
+| **x86-64** |   ✅    |  🟡   |  🟡   |
+| **arm64**  |   ✅    |  🟡   |  🟡（Apple Silicon） |
 
 需要满足 `PLATFORM_LITTLE_ENDIAN && PLATFORM_SUPPORTS_UNALIGNED_LOADS`
 （x64、arm64 都满足）。
+
+> **🟡 Linux / macOS 部分优化** —— Windows（MSVC）上字节对齐和位不对齐
+> 两条路径都走优化实现（~30× / ~5×）。Linux（GCC）和 macOS（Clang）在
+> `-O2` 下，只有字节对齐路径走优化实现；位不对齐路径回退到 UE 原版
+> `appBitsCpy`，这是因为编译器优化与我们算法之间还有一个尚未定位的
+> 相互作用问题，见
+> [#2](https://github.com/chen3feng/FastBitCopy/issues/2)。
+> 行为始终正确 —— 最差情况下和 UE 原版一样快。
 
 ## 安装
 
