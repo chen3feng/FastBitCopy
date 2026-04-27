@@ -9,6 +9,35 @@
 #include "Math/UnrealMathUtility.h"
 #include <atomic>
 
+// A *real* compiler barrier. std::atomic_signal_fence turned out to be
+// insufficient on Clang/GCC -O2 (it disciplines reorderings with respect to
+// signal handlers, but doesn't stop the optimizer from concluding that a
+// uint8* store cannot affect a subsequent uint64* read). An inline-asm
+// memory clobber, on the other hand, forces the compiler to treat every
+// reachable memory location as potentially read/written.
+#if defined(__GNUC__) || defined(__clang__)
+#define FASTBITCOPY_COMPILER_BARRIER() __asm__ __volatile__("" ::: "memory")
+#elif defined(_MSC_VER)
+#include <intrin.h>
+#define FASTBITCOPY_COMPILER_BARRIER() _ReadWriteBarrier()
+#else
+#define FASTBITCOPY_COMPILER_BARRIER() std::atomic_thread_fence(std::memory_order_seq_cst)
+#endif
+
+// Prevent inlining of the top-level entry points. If GCC/Clang inlines
+// BitsCopyFastUnaligned into appBitsCpyFastImpl and then into a caller
+// whose output it can statically see, the aggressive interprocedural
+// dead-store elimination can delete the whole thing (observed on
+// Linux -O2). Keeping the hot functions in their own frame shuts that
+// path down with no measurable runtime cost on the bulk workload.
+#if defined(__GNUC__) || defined(__clang__)
+#define FASTBITCOPY_NOINLINE __attribute__((noinline))
+#elif defined(_MSC_VER)
+#define FASTBITCOPY_NOINLINE __declspec(noinline)
+#else
+#define FASTBITCOPY_NOINLINE
+#endif
+
 #if PLATFORM_LITTLE_ENDIAN && PLATFORM_SUPPORTS_UNALIGNED_LOADS
 
 // Copy bits when BitOffset of Src and Dest are same.
@@ -128,7 +157,7 @@ static void CopyBitsSrcAligned(WordType* Dest, int DestBit, WordType* Src, int B
 	}
 }
 
-static void BitsCopyFastUnaligned(uint8* Dest, int DestBit, uint8* Src, int SrcBit, int BitCount)
+static FASTBITCOPY_NOINLINE void BitsCopyFastUnaligned(uint8 *Dest, int DestBit, uint8 *Src, int SrcBit, int BitCount)
 {
 	// Align SrcBit to 0
 	if (SrcBit != 0)
@@ -181,7 +210,7 @@ static void BitsCopyFastUnaligned(uint8* Dest, int DestBit, uint8* Src, int SrcB
 	// stores above on the assumption they don't alias the uint64* reads that
 	// follow. This is a pure compile-time fence (no runtime cost) that
 	// forces the compiler to keep them.
-	std::atomic_signal_fence(std::memory_order_seq_cst);
+	FASTBITCOPY_COMPILER_BARRIER();
 	CopyBitsSrcAligned((uint64*)Dest, DestBit, (uint64*)Src, BitCount);
 }
 
@@ -280,6 +309,7 @@ void OriginalAppBitsCpyForTest(uint8* Dest, int32 DestBit, uint8* Src, int32 Src
 }
 
 // Our optimized bit copy entry point.
+FASTBITCOPY_NOINLINE
 void appBitsCpyFastImpl(uint8* Dest, int32 DestBit, uint8* Src, int32 SrcBit, int32 BitCount)
 {
 	// Align to byte bound.
