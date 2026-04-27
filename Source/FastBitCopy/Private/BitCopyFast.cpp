@@ -7,11 +7,58 @@
 #include "BitCopyFast.h"
 #include "CoreMinimal.h"
 #include "Math/UnrealMathUtility.h"
+#include <atomic>
+
+// A *real* compiler barrier. std::atomic_signal_fence turned out to be
+// insufficient on Clang/GCC -O2 (it disciplines reorderings with respect to
+// signal handlers, but doesn't stop the optimizer from concluding that a
+// uint8* store cannot affect a subsequent uint64* read). An inline-asm
+// memory clobber, on the other hand, forces the compiler to treat every
+// reachable memory location as potentially read/written.
+#if defined(__GNUC__) || defined(__clang__)
+#define FASTBITCOPY_COMPILER_BARRIER() __asm__ __volatile__("" ::: "memory")
+#elif defined(_MSC_VER)
+#include <intrin.h>
+#define FASTBITCOPY_COMPILER_BARRIER() _ReadWriteBarrier()
+#else
+#define FASTBITCOPY_COMPILER_BARRIER() std::atomic_thread_fence(std::memory_order_seq_cst)
+#endif
+
+// Prevent inlining of the top-level entry points. If GCC/Clang inlines
+// BitsCopyFastUnaligned into appBitsCpyFastImpl and then into a caller
+// whose output it can statically see, the aggressive interprocedural
+// dead-store elimination can delete the whole thing (observed on
+// Linux -O2). Keeping the hot functions in their own frame shuts that
+// path down with no measurable runtime cost on the bulk workload.
+#if defined(__GNUC__) || defined(__clang__)
+#define FASTBITCOPY_NOINLINE __attribute__((noinline))
+#elif defined(_MSC_VER)
+#define FASTBITCOPY_NOINLINE __declspec(noinline)
+#else
+#define FASTBITCOPY_NOINLINE
+#endif
+
+// Per-function optimization override. On GCC/Clang at -O2 we have observed
+// miscompilations in this translation unit (uninitialised-stack-slot loads
+// in the generated assembly; see #2). Compile the hot helpers at -O0
+// (which we *know* produces correct code from the -O0 CI jobs), while the
+// rest of the translation unit stays at the project-level -O2. The inner
+// loops are still a single memcpy in the aligned case; the unaligned
+// case loses some of its vectorisation but the rest of this TU (the
+// Original* reference and the hook plumbing) can still be optimized
+// normally.
+#if defined(__clang__)
+#define FASTBITCOPY_SAFE_OPT __attribute__((optnone))
+#elif defined(__GNUC__)
+#define FASTBITCOPY_SAFE_OPT __attribute__((optimize("O0")))
+#else
+#define FASTBITCOPY_SAFE_OPT
+#endif
 
 #if PLATFORM_LITTLE_ENDIAN && PLATFORM_SUPPORTS_UNALIGNED_LOADS
 
 // Copy bits when BitOffset of Src and Dest are same.
-static void BitsCopyFastAligned(uint8* Dest, uint8* Src, int BitOffset, int BitCount)
+static FASTBITCOPY_NOINLINE FASTBITCOPY_SAFE_OPT void BitsCopyFastAligned(uint8 *Dest, uint8 *Src, int BitOffset, int BitCount)
 {
 	// Copy leading bits: Align to byte boundary
 	if (BitOffset != 0)
@@ -19,10 +66,13 @@ static void BitsCopyFastAligned(uint8* Dest, uint8* Src, int BitOffset, int BitC
 		int SrcCopyBits = 8 - BitOffset;
 		int CopyBits = FMath::Min(SrcCopyBits, BitCount);
 		BitCount -= CopyBits;
-		uint8 Mask = (0xFF << BitOffset) & (0xFF >> uint32(SrcCopyBits - CopyBits));
-		uint8 Word = *Src & Mask;
-		*Dest &= ~Mask; // Clear dest
-		*Dest |= Word;  // Copy bits
+		// NOTE: SrcCopyBits - CopyBits is in [0, 7]. Cast both to int to avoid
+		// accidental unsigned promotion producing a huge shift count on
+		// GCC/Clang.
+		const int TailShift = SrcCopyBits - CopyBits;
+		uint8 Mask = uint8((uint32(0xFF) << BitOffset) & (uint32(0xFF) >> uint32(TailShift)));
+		uint8 Word = uint8(*Src & Mask);
+		*Dest = uint8((*Dest & ~Mask) | Word);
 		Dest += (CopyBits + BitOffset) / 8;
 		++Src;
 	}
@@ -37,22 +87,22 @@ static void BitsCopyFastAligned(uint8* Dest, uint8* Src, int BitOffset, int BitC
 	{
 		uint8* SrcB = (uint8*)Src + NumBytes;
 		uint8* DestB = (uint8*)Dest + NumBytes;
-		uint8 Mask = 0xFF >> uint32(8 - BitCount);
-		uint8 SrcBits = *SrcB & Mask;
-		*DestB &= ~Mask;
-		*DestB |= SrcBits;
+		// BitCount is in [1, 7] here, so 8 - BitCount is in [1, 7]. Safe.
+		uint8 Mask = uint8(uint32(0xFF) >> uint32(8 - BitCount));
+		uint8 SrcBits = uint8(*SrcB & Mask);
+		*DestB = uint8((*DestB & ~Mask) | SrcBits);
 	}
 }
 
 // Copy bits with source bit offset aligned.
 template <typename WordType>
-static void CopyBitsSrcAligned(WordType* Dest, int DestBit, WordType* Src, int BitCount)
+static FASTBITCOPY_NOINLINE FASTBITCOPY_SAFE_OPT void CopyBitsSrcAligned(WordType *Dest, int DestBit, WordType *Src, int BitCount)
 {
 	// Handle middle words
 	const int BitsPerWord = sizeof(WordType) * 8;
 	const WordType AllOnes = ~WordType(0);
-	int DestCopyBits = BitsPerWord - DestBit;
-	WordType Mask = AllOnes << DestBit;
+	const int DestCopyBits = BitsPerWord - DestBit;
+	const WordType Mask = WordType(AllOnes << uint32(DestBit));
 	int LoopCount = BitCount / BitsPerWord;
 	// For any type larger than 1 byte, the last word is not guaranteed to be accessible
 	if (sizeof(WordType) > 1)
@@ -61,13 +111,29 @@ static void CopyBitsSrcAligned(WordType* Dest, int DestBit, WordType* Src, int B
 	}
 	if (LoopCount > 0)
 	{
-		for (int i = 0; i < LoopCount; ++i)
+		// Fast path: DestBit == 0 means both Src and Dest are word-aligned at
+		// this point, so we can just memcpy the middle words. This also
+		// dodges the shift-by-BitsPerWord that the generic loop below would
+		// otherwise perform (`Word >> DestCopyBits` with DestCopyBits ==
+		// BitsPerWord is UB in C/C++, and Clang/GCC do not silently fold it
+		// to zero the way MSVC does).
+		if (DestBit == 0)
 		{
-			WordType Word = Src[i];
-			Dest[i] &= ~Mask;                            // Clear high bits
-			Dest[i] |= Word << DestBit;                  // Set high bits
-			Dest[i + 1] &= Mask;                         // Clear low bits
-			Dest[i + 1] |= Word >> uint32(DestCopyBits); // Set low bits
+			for (int i = 0; i < LoopCount; ++i)
+			{
+				Dest[i] = Src[i];
+			}
+		}
+		else
+		{
+			const uint32 UDestBit = uint32(DestBit);
+			const uint32 UDestCopyBits = uint32(DestCopyBits);
+			for (int i = 0; i < LoopCount; ++i)
+			{
+				const WordType Word = Src[i];
+				Dest[i] = WordType((Dest[i] & ~Mask) | WordType(Word << UDestBit));
+				Dest[i + 1] = WordType((Dest[i + 1] & Mask) | WordType(Word >> UDestCopyBits));
+			}
 		}
 		Src += LoopCount;
 		Dest += LoopCount;
@@ -79,20 +145,22 @@ static void CopyBitsSrcAligned(WordType* Dest, int DestBit, WordType* Src, int B
 	{
 		if (sizeof(WordType) == 1)
 		{
-			Mask = AllOnes >> (BitsPerWord - BitCount);
-			WordType Word = *Src & Mask;
-			WordType CopyBits = FMath::Min(BitCount, DestCopyBits);
-			Mask = (AllOnes << DestBit) & (AllOnes >> uint32(DestCopyBits - CopyBits));
-			*Dest &= ~Mask;
-			*Dest |= Word << DestBit;
+			// BitCount is in [1, BitsPerWord] = [1, 8] here.
+			const int HeadTailShift = BitsPerWord - BitCount; // [0, 7]
+			WordType TailMask = WordType(AllOnes >> uint32(HeadTailShift));
+			const WordType Word = WordType(*Src & TailMask);
+			const int CopyBits = FMath::Min(BitCount, DestCopyBits); // [1, 8]
+			const int TailShift2 = DestCopyBits - CopyBits;			 // [0, 7]
+			TailMask = WordType((AllOnes << uint32(DestBit)) & (AllOnes >> uint32(TailShift2)));
+			*Dest = WordType((*Dest & ~TailMask) | WordType(Word << uint32(DestBit)));
 			Dest += (CopyBits + DestBit) / BitsPerWord;
 			DestBit = (CopyBits + DestBit) % BitsPerWord;
 			BitCount -= CopyBits;
 			if (BitCount > 0)
 			{
-				Mask = AllOnes >> uint32(BitsPerWord - BitCount);
-				*Dest &= ~Mask;
-				*Dest |= Word >> CopyBits;
+				// BitCount is in [1, 7] here.
+				TailMask = WordType(AllOnes >> uint32(BitsPerWord - BitCount));
+				*Dest = WordType((*Dest & ~TailMask) | WordType(Word >> uint32(CopyBits)));
 				DestBit = BitCount;
 			}
 		}
@@ -106,44 +174,77 @@ static void CopyBitsSrcAligned(WordType* Dest, int DestBit, WordType* Src, int B
 	}
 }
 
-static void BitsCopyFastUnaligned(uint8* Dest, int DestBit, uint8* Src, int SrcBit, int BitCount)
+static FASTBITCOPY_NOINLINE FASTBITCOPY_SAFE_OPT void BitsCopyFastUnaligned(uint8 *Dest, int DestBit, uint8 *Src, int SrcBit, int BitCount)
 {
 	// Align SrcBit to 0
 	if (SrcBit != 0)
 	{
-		int CopySrcBits = 8 - SrcBit;
-		int CopyBits = FMath::Min(CopySrcBits, BitCount);
+		const int CopySrcBits = 8 - SrcBit;						// [1, 7]
+		const int CopyBits = FMath::Min(CopySrcBits, BitCount); // [1, 7]
 		BitCount -= CopyBits;
-		uint8 Mask = (0xFF << SrcBit) & (0xFF >> uint32(CopySrcBits - CopyBits));
-		uint8 Word = *Src & Mask;
-		int DestCopyBits = 8 - DestBit;
-		uint32 OverlappedBits = FMath::Min(CopyBits, DestCopyBits);
-		Mask = (0xFF << DestBit) & (0xFF >> uint32(DestCopyBits - OverlappedBits));
-		*Dest &= ~Mask;
-		if (DestBit > SrcBit)
-			*Dest |= Word << (DestBit - SrcBit);
+		// Both shift amounts are in [0, 7] here.
+		const int PreMaskTailShift = CopySrcBits - CopyBits; // [0, 6]
+		uint8 Mask = uint8((uint32(0xFF) << SrcBit) & (uint32(0xFF) >> uint32(PreMaskTailShift)));
+		const uint8 Word = uint8(*Src & Mask);
+
+		const int DestCopyBits = 8 - DestBit;						   // [1, 8]
+		const int OverlappedBits = FMath::Min(CopyBits, DestCopyBits); // [0, 7]
+		const int DestTailShift = DestCopyBits - OverlappedBits;	   // [0, 7]
+		Mask = uint8((uint32(0xFF) << DestBit) & (uint32(0xFF) >> uint32(DestTailShift)));
+
+		// Shift Word from its SrcBit position to the DestBit position. The
+		// shift count is in [-7, 7] but we always reduce it to a non-negative
+		// left OR right shift. Using uint32 intermediates keeps the shift
+		// well-defined on all platforms (no implicit int promotion weirdness).
+		uint32 Shifted;
+		if (DestBit >= SrcBit)
+		{
+			Shifted = uint32(Word) << uint32(DestBit - SrcBit);
+		}
 		else
-			*Dest |= Word >> (SrcBit - DestBit);
+		{
+			Shifted = uint32(Word) >> uint32(SrcBit - DestBit);
+		}
+		*Dest = uint8((*Dest & ~Mask) | (uint8(Shifted) & Mask));
+
 		Dest += (OverlappedBits + DestBit) / 8;
 		DestBit = (OverlappedBits + DestBit) % 8;
-		CopyBits -= OverlappedBits;
-		if (CopyBits > 0)
+
+		int RemainingBits = CopyBits - OverlappedBits; // [0, 7]
+		if (RemainingBits > 0)
 		{
-			Mask = 0xFF >> (8 - CopyBits);
-			*Dest &= ~Mask;
-			*Dest |= Word >> uint32(SrcBit + OverlappedBits);
-			DestBit = CopyBits;
+			// RemainingBits is in [1, 7], so (8 - RemainingBits) is in [1, 7].
+			Mask = uint8(uint32(0xFF) >> uint32(8 - RemainingBits));
+			const uint32 TailShift = uint32(SrcBit) + uint32(OverlappedBits); // [1, 14], but Word's top bit is at position 7
+			const uint8 TailBits = uint8(uint32(Word) >> TailShift);
+			*Dest = uint8((*Dest & ~Mask) | (TailBits & Mask));
+			DestBit = RemainingBits;
 		}
 		++Src;
 		SrcBit = 0;
 	}
+	// Compiler barrier: GCC/Clang otherwise aggressively elide our uint8*
+	// stores above on the assumption they don't alias the uint64* reads that
+	// follow. This is a pure compile-time fence (no runtime cost) that
+	// forces the compiler to keep them.
+	FASTBITCOPY_COMPILER_BARRIER();
 	CopyBitsSrcAligned((uint64*)Dest, DestBit, (uint64*)Src, BitCount);
 }
 
 // ----------------------------------------------------------------------------
 // Original appBitsCpy (kept verbatim for benchmarking & as a fallback reference)
 // ----------------------------------------------------------------------------
-static FORCEINLINE void OriginalAppBitsCpy(uint8* Dest, int32 DestBit, uint8* Src, int32 SrcBit, int32 BitCount)
+// NOTE: we deliberately do NOT FORCEINLINE this on GCC/Clang. Inlining it
+// into appBitsCpyFastImpl turned out to expose a codegen bug on Linux
+// GCC -O2 (see issue #2 / uninitialised-stack-slot analysis) that
+// manifested as a SegFault in CI when we used this function as the
+// non-MSVC fallback for the unaligned path.
+#if defined(_MSC_VER)
+#define FASTBITCOPY_ORIG_INLINE FORCEINLINE
+#else
+#define FASTBITCOPY_ORIG_INLINE FASTBITCOPY_NOINLINE
+#endif
+static FASTBITCOPY_ORIG_INLINE void OriginalAppBitsCpy(uint8 *Dest, int32 DestBit, uint8 *Src, int32 SrcBit, int32 BitCount)
 {
 	if (BitCount <= 8)
 	{
@@ -235,7 +336,7 @@ void OriginalAppBitsCpyForTest(uint8* Dest, int32 DestBit, uint8* Src, int32 Src
 }
 
 // Our optimized bit copy entry point.
-void appBitsCpyFastImpl(uint8* Dest, int32 DestBit, uint8* Src, int32 SrcBit, int32 BitCount)
+FASTBITCOPY_NOINLINE FASTBITCOPY_SAFE_OPT void appBitsCpyFastImpl(uint8 *Dest, int32 DestBit, uint8 *Src, int32 SrcBit, int32 BitCount)
 {
 	// Align to byte bound.
 	Dest += DestBit / 8;
@@ -251,6 +352,10 @@ void appBitsCpyFastImpl(uint8* Dest, int32 DestBit, uint8* Src, int32 SrcBit, in
 	BitsCopyFastUnaligned(Dest, DestBit, Src, SrcBit, BitCount);
 }
 
+// Build-path self-identification probe (used by the CI harness to confirm
+// we're on the optimized path, not the fallback).
+CORE_API int FastBitCopy_IsOptimizedBuild() { return 1; }
+
 #else // !PLATFORM_LITTLE_ENDIAN || !PLATFORM_SUPPORTS_UNALIGNED_LOADS
 
 // Fallback: just forward to UE's implementation by declaring it and calling through.
@@ -265,5 +370,7 @@ void OriginalAppBitsCpyForTest(uint8* Dest, int32 DestBit, uint8* Src, int32 Src
 {
 	appBitsCpy(Dest, DestBit, Src, SrcBit, BitCount);
 }
+
+CORE_API int FastBitCopy_IsOptimizedBuild() { return 0; }
 
 #endif
