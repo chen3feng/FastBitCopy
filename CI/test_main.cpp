@@ -250,6 +250,20 @@ int main()
         std::printf("[info] smoke(unaligned 5/3 64b): tmp[0..4]=%02X %02X %02X %02X %02X\n",
                     tmp[0], tmp[1], tmp[2], tmp[3], tmp[4]);
     }
+    // Same unaligned smoke but with the 0xA5 sentinel used by the edge
+    // cases and a realistic source pattern (first bytes from the random
+    // stream): this is what the main correctness sweep actually feeds to
+    // the function. On a healthy build tmp[0] should come out 0x45.
+    {
+        uint8 tmp[32];
+        std::memset(tmp, 0xA5, sizeof(tmp));
+        const uint8 src_bytes[] = {0x92, 0x8C, 0xD0, 0x24, 0xED, 0xA6, 0x00, 0x00, 0};
+        uint8 src[32];
+        std::memcpy(src, src_bytes, sizeof(src_bytes));
+        appBitsCpyFastImpl(tmp, 5, src, 3, 64);
+        std::printf("[info] smoke(sentinel 0xA5, real src): tmp[0..4]=%02X %02X %02X %02X %02X (expect 45 32 42 93 ..)\n",
+                    tmp[0], tmp[1], tmp[2], tmp[3], tmp[4]);
+    }
 
     std::mt19937 Rng(0xC0FFEEu);
     int rc = RunCorrectness(Rng);
