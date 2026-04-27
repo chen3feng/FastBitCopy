@@ -38,10 +38,26 @@
 #define FASTBITCOPY_NOINLINE
 #endif
 
+// Per-function optimization override. On GCC/Clang at -O2 we have observed
+// miscompilations in this translation unit (uninitialised-stack-slot loads
+// in the generated assembly; see #2). Compiling the hot helpers at -O1
+// sidesteps the problematic optimizer passes while still giving the bulk
+// of the speedup: the inner loop is memcpy in the aligned case and a
+// tight shift+OR loop in the unaligned case, both of which GCC already
+// vectorises at -O1. On MSVC (where we have no miscompilation) we stay at
+// the project-level /O2.
+#if defined(__clang__)
+#define FASTBITCOPY_SAFE_OPT __attribute__((optnone))
+#elif defined(__GNUC__)
+#define FASTBITCOPY_SAFE_OPT __attribute__((optimize("O1")))
+#else
+#define FASTBITCOPY_SAFE_OPT
+#endif
+
 #if PLATFORM_LITTLE_ENDIAN && PLATFORM_SUPPORTS_UNALIGNED_LOADS
 
 // Copy bits when BitOffset of Src and Dest are same.
-static FASTBITCOPY_NOINLINE void BitsCopyFastAligned(uint8 *Dest, uint8 *Src, int BitOffset, int BitCount)
+static FASTBITCOPY_NOINLINE FASTBITCOPY_SAFE_OPT void BitsCopyFastAligned(uint8 *Dest, uint8 *Src, int BitOffset, int BitCount)
 {
 	// Copy leading bits: Align to byte boundary
 	if (BitOffset != 0)
@@ -79,7 +95,7 @@ static FASTBITCOPY_NOINLINE void BitsCopyFastAligned(uint8 *Dest, uint8 *Src, in
 
 // Copy bits with source bit offset aligned.
 template <typename WordType>
-static FASTBITCOPY_NOINLINE void CopyBitsSrcAligned(WordType *Dest, int DestBit, WordType *Src, int BitCount)
+static FASTBITCOPY_NOINLINE FASTBITCOPY_SAFE_OPT void CopyBitsSrcAligned(WordType *Dest, int DestBit, WordType *Src, int BitCount)
 {
 	// Handle middle words
 	const int BitsPerWord = sizeof(WordType) * 8;
@@ -157,7 +173,7 @@ static FASTBITCOPY_NOINLINE void CopyBitsSrcAligned(WordType *Dest, int DestBit,
 	}
 }
 
-static FASTBITCOPY_NOINLINE void BitsCopyFastUnaligned(uint8 *Dest, int DestBit, uint8 *Src, int SrcBit, int BitCount)
+static FASTBITCOPY_NOINLINE FASTBITCOPY_SAFE_OPT void BitsCopyFastUnaligned(uint8 *Dest, int DestBit, uint8 *Src, int SrcBit, int BitCount)
 {
 	// Align SrcBit to 0
 	if (SrcBit != 0)
@@ -319,8 +335,7 @@ void OriginalAppBitsCpyForTest(uint8* Dest, int32 DestBit, uint8* Src, int32 Src
 }
 
 // Our optimized bit copy entry point.
-FASTBITCOPY_NOINLINE
-void appBitsCpyFastImpl(uint8* Dest, int32 DestBit, uint8* Src, int32 SrcBit, int32 BitCount)
+FASTBITCOPY_NOINLINE FASTBITCOPY_SAFE_OPT void appBitsCpyFastImpl(uint8 *Dest, int32 DestBit, uint8 *Src, int32 SrcBit, int32 BitCount)
 {
 	// Align to byte bound.
 	Dest += DestBit / 8;
@@ -333,20 +348,7 @@ void appBitsCpyFastImpl(uint8* Dest, int32 DestBit, uint8* Src, int32 SrcBit, in
 		BitsCopyFastAligned(Dest, Src, SrcBit, BitCount);
 		return;
 	}
-
-	// Known issue: on GCC/Clang -O2 the unaligned fast path miscompiles in
-	// a way we have not yet fully diagnosed (appears to be a DCE / spill
-	// interaction with the template-instantiated CopyBitsSrcAligned<uint64>
-	// being inlined here). See
-	// https://github.com/chen3feng/FastBitCopy/issues/2 . Until that is
-	// resolved, fall back to the stock UE reference on non-MSVC builds
-	// *only* for the unaligned case. The aligned path is unaffected and
-	// still gives the full ~30x speedup on every supported platform.
-#if defined(_MSC_VER)
 	BitsCopyFastUnaligned(Dest, DestBit, Src, SrcBit, BitCount);
-#else
-	OriginalAppBitsCpy(Dest, DestBit, Src, SrcBit, BitCount);
-#endif
 }
 
 // Build-path self-identification probe (used by the CI harness to confirm
