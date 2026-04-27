@@ -1,0 +1,167 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1) Validate the .uplugin JSON file – fast, lightweight sanity check.
+  # ---------------------------------------------------------------------------
+  uplugin-validate:
+    name: Validate .uplugin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse FastBitCopy.uplugin as JSON
+        run: |
+          python3 - <<'PY'
+          import json, sys, pathlib
+          p = pathlib.Path("FastBitCopy.uplugin")
+          data = json.loads(p.read_text(encoding="utf-8"))
+          required = ["FileVersion", "VersionName", "FriendlyName", "Modules"]
+          missing = [k for k in required if k not in data]
+          if missing:
+              sys.exit(f"Missing keys in .uplugin: {missing}")
+          mods = data.get("Modules") or []
+          if not mods:
+              sys.exit("No Modules declared in .uplugin")
+          names = [m.get("Name") for m in mods]
+          print("OK: version={}, modules={}".format(data["VersionName"], names))
+          PY
+
+  # ---------------------------------------------------------------------------
+  # 2) Build & run the standalone correctness/benchmark harness on 3 OSes.
+  #    This does NOT build the UE plugin itself (would need a full UE
+  #    checkout, which doesn't fit on GitHub-hosted runners). The harness
+  #    compiles BitCopyFast.cpp as pure C++ via a tiny shim and validates
+  #    the algorithm against the original UE reference.
+  # ---------------------------------------------------------------------------
+  standalone-test:
+    name: Standalone test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure (CMake)
+        run: cmake -S CI -B CI/build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build CI/build --config Release -j
+
+      - name: Run correctness + micro-benchmark
+        run: ctest --test-dir CI/build --output-on-failure -C Release
+
+  # Known issue: on GCC/Clang -O2 the algorithm produces results that
+  # diverge from the reference implementation. Until that is resolved,
+  # also run an -O0 sweep on Linux/macOS so CI can still detect
+  # regressions in the algorithm's overall logic.
+  standalone-test-debug:
+    name: Standalone test -O0 (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure (Debug)
+        run: cmake -S CI -B CI/build-dbg -DCMAKE_BUILD_TYPE=Debug
+      - name: Build
+        run: cmake --build CI/build-dbg --config Debug -j
+      - name: Run correctness + micro-benchmark
+        run: ctest --test-dir CI/build-dbg --output-on-failure -C Debug
+
+
+  # Extra Linux job with UBSan/ASan to catch undefined behavior in the
+  # algorithm. Separate so a UB hit doesn't mask a plain correctness issue.
+  sanitizers:
+    name: Sanitizers (ubuntu-latest)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure with UBSan+ASan
+        run: |
+          cmake -S CI -B CI/build-san \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS="-fsanitize=undefined,address -fno-omit-frame-pointer -g" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=undefined,address"
+      - name: Build
+        run: cmake --build CI/build-san -j
+      - name: Run under sanitizers
+        env:
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+          ASAN_OPTIONS: detect_leaks=0:halt_on_error=1
+        run: ctest --test-dir CI/build-san --output-on-failure
+
+  # ---------------------------------------------------------------------------
+  # Diagnostic job: compile BitCopyFast.cpp to assembly on Linux -O2 and
+  # upload it as an artifact, so we can inspect whether the optimizer is
+  # actually generating the uint8* stores we expect.
+  # ---------------------------------------------------------------------------
+  dump-asm:
+    name: Dump -O2 assembly (linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile BitCopyFast.cpp to assembly
+        run: |
+          mkdir -p asm-out
+          g++ -S -O2 -fno-strict-aliasing -std=c++17 \
+            -ICI -ICI/compat -ISource/FastBitCopy/Public \
+            -include CI/ue_shim.h \
+            Source/FastBitCopy/Private/BitCopyFast.cpp \
+            -o asm-out/BitCopyFast.s
+          echo "--- first 200 lines of BitsCopyFastUnaligned region ---"
+          grep -n 'BitsCopyFastUnaligned\|appBitsCpyFastImpl\|CopyBitsSrcAligned' asm-out/BitCopyFast.s | head -n 40 || true
+          echo "--- total line count ---"
+          wc -l asm-out/BitCopyFast.s
+      - name: Upload assembly artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BitCopyFast-linux-O2-asm
+          path: asm-out/BitCopyFast.s
+
+  # ---------------------------------------------------------------------------
+  # 3) Cross-compile the core algorithm for arm64 on Linux, to make sure
+  #    BitCopyFast.cpp still compiles cleanly for the ARM target supported
+  #    by the plugin. We only build (can't execute without qemu), which
+  #    is still a useful signal.
+  # ---------------------------------------------------------------------------
+  arm64-crossbuild:
+    name: arm64 cross-build (linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install aarch64 toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-aarch64-linux-gnu
+
+      - name: Configure
+        run: |
+          cmake -S CI -B CI/build-arm64 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_SYSTEM_NAME=Linux \
+            -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+            -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
+            -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++
+
+      - name: Build
+        run: cmake --build CI/build-arm64 --config Release -j
