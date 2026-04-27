@@ -1,0 +1,19 @@
+{
+	"FileVersion": 3,
+	"EngineAssociation": "5.3",
+	"Category": "",
+	"Description": "Host project for running FastBitCopy automation tests.",
+	"Modules": [
+		{
+			"Name": "FastBitCopyHost",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	],
+	"Plugins": [
+		{ "Name": "FastBitCopy", "Enabled": true }
+	],
+	"AdditionalPluginDirectories": [
+		".."
+	]
+}
