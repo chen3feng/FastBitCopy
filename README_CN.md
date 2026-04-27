@@ -50,11 +50,18 @@ UE 自带的 `appBitsCpy` 是逐字节处理的标量实现。在 x86-64 与 arm
 
 |            | Windows | Linux | macOS |
 |------------|:-------:|:-----:|:-----:|
-| **x86-64** |   ✅    |  ✅   |  ✅   |
-| **arm64**  |   ✅    |  ✅   |  ✅（Apple Silicon） |
+| **x86-64** |   ✅    |  ⚠️   |  ⚠️   |
+| **arm64**  |   ✅    |  ⚠️   |  ⚠️（Apple Silicon） |
 
 需要满足 `PLATFORM_LITTLE_ENDIAN && PLATFORM_SUPPORTS_UNALIGNED_LOADS`
 （x64、arm64 都满足）。
+
+> **⚠️ 已知问题** —— 优化算法目前在 GCC/Clang 的 `-O2`（Linux、macOS）
+> 下会产生错误结果。MSVC（Windows）则完全通过 20000 组随机测试与 11 组
+> 边界用例校验。算法本身的逻辑是正确的（Linux/mac 在 `-O0` 下全部通过），
+> 这是一个编译器优化 / 未定义行为相互作用的问题，正在跟进。
+> **Linux / macOS 上请勿发布此插件**，直到该问题被修复。跟进进度见
+> [#2](https://github.com/chen3feng/FastBitCopy/issues/2)。
 
 ## 安装
 

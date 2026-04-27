@@ -48,12 +48,21 @@ x86-64 and arm64 we can do much better with aligned 64-bit loads/stores plus
 
 |            | Windows | Linux | macOS |
 |------------|:-------:|:-----:|:-----:|
-| **x86-64** |   ✅    |  ✅   |  ✅   |
-| **arm64**  |   ✅    |  ✅   |  ✅ (Apple Silicon) |
+| **x86-64** |   ✅    |  ⚠️   |  ⚠️   |
+| **arm64**  |   ✅    |  ⚠️   |  ⚠️ (Apple Silicon) |
 
 Requires a little-endian CPU that allows unaligned loads
 (`PLATFORM_LITTLE_ENDIAN && PLATFORM_SUPPORTS_UNALIGNED_LOADS`). Both x64
 and arm64 qualify.
+
+> **⚠️ Known issue** — the optimized algorithm currently miscompiles under
+> GCC/Clang at `-O2` (Linux and macOS). MSVC (Windows) is fully validated
+> against 20 000 random trials and 11 deterministic edge cases. The
+> algorithm is logically correct (Linux/mac at `-O0` pass), so this is an
+> undefined-behaviour / dataflow-optimization interaction that we are
+> still tracking. Do **not** ship this plugin on Linux/macOS until the
+> issue is resolved. See
+> [#2](https://github.com/chen3feng/FastBitCopy/issues/2) for progress.
 
 ## Installation
 
