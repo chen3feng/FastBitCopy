@@ -48,13 +48,21 @@ using int64  = std::int64_t;
 
 struct FMath
 {
-    template <class A, class B>
-    static constexpr auto Min(A a, B b) -> decltype(a < b ? a : b)
+    // NOTE: return by value, NOT by the deduced type of a conditional
+    // expression.  `decltype(a < b ? a : b)` on two same-typed lvalues
+    // yields an lvalue reference, which would make Min/Max return a
+    // dangling reference to a by-value parameter -- observed as an
+    // AddressSanitizer "stack-use-after-return" at -O2 on GCC/Clang
+    // (the -O0 CI jobs happened to not reuse the stack slot so the
+    // bug was masked there).  Keep the signature close to UE's real
+    // FMath::Min<T>(T,T) which also returns by value.
+    template <class T>
+    static constexpr T Min(T a, T b)
     {
         return a < b ? a : b;
     }
-    template <class A, class B>
-    static constexpr auto Max(A a, B b) -> decltype(a > b ? a : b)
+    template <class T>
+    static constexpr T Max(T a, T b)
     {
         return a > b ? a : b;
     }
