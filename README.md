@@ -48,21 +48,30 @@ x86-64 and arm64 we can do much better with aligned 64-bit loads/stores plus
 
 |            | Windows | Linux | macOS |
 |------------|:-------:|:-----:|:-----:|
-| **x86-64** |   ✅    |  🟡   |  🟡   |
-| **arm64**  |   ✅    |  🟡   |  🟡 (Apple Silicon) |
+| **x86-64** |   ✅    |  ✅   |  ✅   |
+| **arm64**  |   ✅    |  ✅   |  ✅ (Apple Silicon) |
 
 Requires a little-endian CPU that allows unaligned loads
 (`PLATFORM_LITTLE_ENDIAN && PLATFORM_SUPPORTS_UNALIGNED_LOADS`). Both x64
 and arm64 qualify.
 
-> **🟡 Partial optimization on Linux/macOS** — on Windows (MSVC) both the
-> byte-aligned and bit-unaligned paths use the optimized implementation
-> (~30× / ~5×). On Linux (GCC) and macOS (Clang) at `-O2`, only the
-> byte-aligned path is optimized; the bit-unaligned path falls back to
-> UE's stock `appBitsCpy` because of a compiler optimization interaction
-> we are still tracking. See
-> [#2](https://github.com/chen3feng/FastBitCopy/issues/2). Behaviour is
-> always correct — the worst case is "as fast as stock UE".
+> **Cross-platform correctness.** Both the byte-aligned and bit-unaligned
+> fast paths are compiled and exercised on all three host OSes in CI —
+> standalone `-O2` (MSVC, GCC, Clang), an additional `-O0` sweep on
+> Linux/macOS, and an UBSan+ASan run on Linux — and each covers the
+> 10 000-trial randomized correctness suite plus the page-boundary /
+> deterministic edge cases. The speed-up figures in the table above were
+> measured on Windows (MSVC); absolute numbers on Linux/macOS will vary
+> with compiler and host CPU, but the implementation path is the same.
+>
+> History note: issue
+> [#2](https://github.com/chen3feng/FastBitCopy/issues/2) tracked an
+> earlier `-O2` divergence on GCC/Clang that was resolved before the
+> standalone CI job became blocking. The current GCC/Clang build carries
+> a small set of defensive compile-time barriers (`FASTBITCOPY_NOINLINE`,
+> an inline-asm `"memory"` barrier, and an `optnone` wrapper around the
+> unaligned bulk copy) which we plan to peel back one at a time in
+> follow-up PRs, re-verifying CI at each step.
 
 ## Installation
 

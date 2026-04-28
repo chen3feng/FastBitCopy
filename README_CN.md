@@ -50,19 +50,28 @@ UE 自带的 `appBitsCpy` 是逐字节处理的标量实现。在 x86-64 与 arm
 
 |            | Windows | Linux | macOS |
 |------------|:-------:|:-----:|:-----:|
-| **x86-64** |   ✅    |  🟡   |  🟡   |
-| **arm64**  |   ✅    |  🟡   |  🟡（Apple Silicon） |
+| **x86-64** |   ✅    |  ✅   |  ✅   |
+| **arm64**  |   ✅    |  ✅   |  ✅（Apple Silicon） |
 
 需要满足 `PLATFORM_LITTLE_ENDIAN && PLATFORM_SUPPORTS_UNALIGNED_LOADS`
 （x64、arm64 都满足）。
 
-> **🟡 Linux / macOS 部分优化** —— Windows（MSVC）上字节对齐和位不对齐
-> 两条路径都走优化实现（~30× / ~5×）。Linux（GCC）和 macOS（Clang）在
-> `-O2` 下，只有字节对齐路径走优化实现；位不对齐路径回退到 UE 原版
-> `appBitsCpy`，这是因为编译器优化与我们算法之间还有一个尚未定位的
-> 相互作用问题，见
-> [#2](https://github.com/chen3feng/FastBitCopy/issues/2)。
-> 行为始终正确 —— 最差情况下和 UE 原版一样快。
+> **跨平台正确性。** 三大主机 OS 上 CI 都会在 `-O2` 下（MSVC / GCC /
+> Clang）编译并运行字节对齐与位不对齐两条快速路径，外加 Linux/macOS
+> 的 `-O0` 对照扫、以及 Linux 上的一次 UBSan + ASan 专项，每项都覆盖
+> 10 000 组随机 `(SrcBit, DstBit, BitCount)` 正确性测试和页边界 /
+> 确定性边界用例。上面表中的加速比是在 Windows (MSVC) 上测得，
+> Linux/macOS 上的绝对数字会随编译器和宿主 CPU 不同而变化，但走的
+> 是同一条优化实现路径。
+>
+> 历史记录：Issue
+> [#2](https://github.com/chen3feng/FastBitCopy/issues/2) 跟踪过早期
+> GCC/Clang `-O2` 下位不对齐路径与引用实现不一致的问题，在
+> standalone CI job 转为阻塞门禁之前已得到解决。当前 GCC/Clang 构建
+> 带有一小组防御性编译时屏障（`FASTBITCOPY_NOINLINE`、一条
+> `"memory"` 内联汇编屏障、以及对 unaligned bulk 段的 `optnone`
+> 包装），我们会在后续 PR 中按影响由小到大逐个拆除，每一步都会在
+> CI 中重新验证。
 
 ## 安装
 
