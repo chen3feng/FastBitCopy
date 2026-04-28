@@ -197,6 +197,8 @@ struct FBenchResult
 	double OriginalUnaligned;
 	double FastAligned;
 	double FastUnaligned;
+	double HookedAligned;
+	double HookedUnaligned;
 };
 
 template <int BytesSize>
@@ -210,8 +212,8 @@ static FBenchResult BenchSize()
 	R.OriginalUnaligned = BenchOne<BytesSize, Original, Unaligned>(LoopCount);
 	R.FastAligned = BenchOne<BytesSize, Fast, Aligned>(LoopCount);
 	R.FastUnaligned = BenchOne<BytesSize, Fast, Unaligned>(LoopCount);
-	BenchOne<BytesSize, Hooked  , Aligned  >(LoopCount);
-	BenchOne<BytesSize, Hooked  , Unaligned>(LoopCount);
+	R.HookedAligned = BenchOne<BytesSize, Hooked, Aligned>(LoopCount);
+	R.HookedUnaligned = BenchOne<BytesSize, Hooked, Unaligned>(LoopCount);
 	return R;
 }
 
@@ -234,21 +236,27 @@ bool FFastBitCopySpeed::RunTest(const FString& Parameters)
 	// (In practice Fast is typically 2-10x faster for large sizes.)
 	auto Check = [this](int Size, const FBenchResult &R)
 	{
-		// Only check unaligned — that's where the algorithmic improvement is.
-		if (R.FastUnaligned > R.OriginalUnaligned * 1.05)
+		// Check the hooked path (what callers actually experience) against
+		// the original. If the hook is installed, Hooked should be as fast
+		// as Fast; if not, it falls back to Original speed.
+		if (R.HookedUnaligned > R.OriginalUnaligned * 1.05)
 		{
 			AddWarning(FString::Printf(
 				TEXT("Optimization regression at %d bytes unaligned: "
-					 "Fast=%.4fs > Original=%.4fs (ratio=%.2fx)"),
-				Size, R.FastUnaligned, R.OriginalUnaligned,
-				R.FastUnaligned / R.OriginalUnaligned));
+					 "Hooked=%.4fs > Original=%.4fs (ratio=%.2fx)"),
+				Size, R.HookedUnaligned, R.OriginalUnaligned,
+				R.HookedUnaligned / R.OriginalUnaligned));
 		}
 		else
 		{
 			UE_LOG(LogFastBitCopyTests, Display,
-				   TEXT("  >> %d bytes unaligned speedup: %.2fx"),
-				   Size, R.OriginalUnaligned / FMath::Max(R.FastUnaligned, 1e-9));
+				   TEXT("  >> %d bytes unaligned hooked speedup: %.2fx"),
+				   Size, R.OriginalUnaligned / FMath::Max(R.HookedUnaligned, 1e-9));
 		}
+		// Also log the direct fast-path speedup for reference.
+		UE_LOG(LogFastBitCopyTests, Display,
+			   TEXT("  >> %d bytes unaligned fast speedup:   %.2fx"),
+			   Size, R.OriginalUnaligned / FMath::Max(R.FastUnaligned, 1e-9));
 	};
 
 	Check(64, BenchSize<64>());
