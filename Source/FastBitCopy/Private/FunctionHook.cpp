@@ -895,16 +895,13 @@ bool FFunctionHook::Install(void *Target, void *Detour, void **OutTrampoline)
 	if (bInstalled)
 		return false;
 
+#if PLATFORM_CPU_X86_FAMILY || PLATFORM_CPU_ARM_FAMILY
 #if PLATFORM_CPU_X86_FAMILY
 	const FInstallResult R = InstallHook_X64(Target, Detour);
-#elif PLATFORM_CPU_ARM_FAMILY
-	const FInstallResult R = InstallHook_Arm64(Target, Detour);
 #else
-	(void)Target; (void)Detour; (void)OutTrampoline;
-	return false;
+	const FInstallResult R = InstallHook_Arm64(Target, Detour);
 #endif
 
-#if PLATFORM_CPU_X86_FAMILY || PLATFORM_CPU_ARM_FAMILY
 	if (!R.bOk)
 		return false;
 
@@ -917,9 +914,13 @@ bool FFunctionHook::Install(void *Target, void *Detour, void **OutTrampoline)
 	if (OutTrampoline)
 		*OutTrampoline = TrampolineMem;
 	return true;
-#endif
-	// Unreachable on supported platforms; keeps the compiler happy.
+#else
+	// Unsupported CPU family — hook is a no-op.
+	(void)Target;
+	(void)Detour;
+	(void)OutTrampoline;
 	return false;
+#endif
 }
 bool FFunctionHook::Uninstall()
 {
