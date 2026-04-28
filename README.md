@@ -66,14 +66,17 @@ normally.
 **Big-endian platforms** — The optimized implementation is compiled out
 entirely; the module loads but does nothing (no hook, no overhead).
 
-> **Cross-platform correctness.** Both the byte-aligned and bit-unaligned
-> fast paths are compiled and exercised on all three host OSes in CI —
-> standalone `-O2` (MSVC, GCC, Clang), an additional `-O0` sweep on
-> Linux/macOS, and an UBSan+ASan run on Linux — and each covers the
-> 10 000-trial randomized correctness suite plus the page-boundary /
+> **Actual test coverage.** The plugin has been tested on three operating
+> systems (Windows / Linux / macOS) × two CPU architectures (x86-64 /
+> arm64). CI compiles and exercises both the byte-aligned and bit-unaligned
+> fast paths at `-O2` (MSVC, GCC, Clang), plus an additional `-O0` sweep
+> on Linux/macOS and an UBSan+ASan run on Linux — each covering the
+> 10 000-trial randomized correctness suite plus page-boundary /
 > deterministic edge cases. The speed-up figures in the table above were
 > measured on Windows (MSVC); absolute numbers on Linux/macOS will vary
 > with compiler and host CPU, but the implementation path is the same.
+> Android has not been verified on a real device yet, but the code path is
+> identical to Linux arm64.
 
 ## Installation
 

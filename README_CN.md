@@ -66,13 +66,15 @@ UE 自带的 `appBitsCpy` 是逐字节处理的标量实现。在 x86-64 与 arm
 **Big-endian 平台** — 优化实现在编译期完全排除；模块加载但不做任何
 事情（不 hook、无额外开销）。
 
-> **跨平台正确性。** 三大主机 OS 上 CI 都会在 `-O2` 下（MSVC / GCC /
-> Clang）编译并运行字节对齐与位不对齐两条快速路径，外加 Linux/macOS
-> 的 `-O0` 对照扫、以及 Linux 上的一次 UBSan + ASan 专项，每项都覆盖
-> 10 000 组随机 `(SrcBit, DstBit, BitCount)` 正确性测试和页边界 /
-> 确定性边界用例。上面表中的加速比是在 Windows (MSVC) 上测得，
-> Linux/macOS 上的绝对数字会随编译器和宿主 CPU 不同而变化，但走的
-> 是同一条优化实现路径。
+> **实际测试覆盖。** 目前已在三种操作系统（Windows / Linux / macOS）×
+> 两种 CPU 架构（x86-64 / arm64）上实际测试通过。CI 在 `-O2` 下
+>（MSVC / GCC / Clang）编译并运行字节对齐与位不对齐两条快速路径，
+> 外加 Linux/macOS 的 `-O0` 对照扫、以及 Linux 上的一次 UBSan + ASan
+> 专项，每项都覆盖 10 000 组随机 `(SrcBit, DstBit, BitCount)` 正确性
+> 测试和页边界 / 确定性边界用例。上面表中的加速比是在 Windows (MSVC)
+> 上测得，Linux/macOS 上的绝对数字会随编译器和宿主 CPU 不同而变化，
+> 但走的是同一条优化实现路径。Android 尚未实机验证，但代码路径与
+> Linux arm64 完全一致。
 
 ## 安装
 
