@@ -33,4 +33,5 @@ Thumbs.db
 TestHost/Config/
 
 # TestHost plugin root junction/symlink (created by build scripts)
-TestHost/.plugin_root/
+# No trailing slash: on Windows it's a directory junction, on Linux/Mac a symlink file.
+TestHost/.plugin_root
