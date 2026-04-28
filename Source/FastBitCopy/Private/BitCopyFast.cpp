@@ -24,7 +24,7 @@
 #include "Math/UnrealMathUtility.h"
 #include <cstring>
 
-#if PLATFORM_LITTLE_ENDIAN && PLATFORM_SUPPORTS_UNALIGNED_LOADS
+#if PLATFORM_LITTLE_ENDIAN
 
 // Copy bits when BitOffset of Src and Dest are same.
 static void BitsCopyFastAligned(uint8 *Dest, uint8 *Src, int BitOffset, int BitCount)
@@ -67,10 +67,11 @@ static void BitsCopyFastAligned(uint8 *Dest, uint8 *Src, int BitOffset, int BitC
 // memcpy of a trivially-copyable scalar to a single machine load/store
 // at -O1 and above, so this is both language-legal (no strict-aliasing
 // or alignment UB) *and* generates the same single `mov` we want on
-// x86/x64 and arm64. On platforms with hardware-misaligned-load support
-// (PLATFORM_SUPPORTS_UNALIGNED_LOADS) the runtime cost is identical to
-// a raw `*p` dereference; the difference is strictly in what the C++
-// standard and UBSan consider well-defined.
+// x86/x64 and arm64. The runtime cost is identical to a raw `*p`
+// dereference on platforms with hardware unaligned-load support; on
+// others the compiler emits a short byte-by-byte sequence. The
+// difference is strictly in what the C++ standard and UBSan consider
+// well-defined.
 //
 // Rationale for not just reverting to `Dest[i] = Src[i]`: `CopyBitsSrcAligned`
 // is called from `BitsCopyFastUnaligned` after a leading-byte alignment pass
@@ -344,7 +345,7 @@ void appBitsCpyFastImpl(uint8 *Dest, int32 DestBit, uint8 *Src, int32 SrcBit, in
 // we're on the optimized path, not the fallback).
 int FastBitCopy_IsOptimizedBuild() { return 1; }
 
-#else // !PLATFORM_LITTLE_ENDIAN || !PLATFORM_SUPPORTS_UNALIGNED_LOADS
+#else // !PLATFORM_LITTLE_ENDIAN
 
 // Fallback: just forward to UE's implementation by declaring it and calling through.
 CORE_API void appBitsCpy(uint8* Dest, int32 DestBit, uint8* Src, int32 SrcBit, int32 BitCount);

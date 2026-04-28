@@ -20,7 +20,7 @@
 #include <bitset>
 #include <string>
 
-#if WITH_DEV_AUTOMATION_TESTS
+#if WITH_DEV_AUTOMATION_TESTS && PLATFORM_LITTLE_ENDIAN
 
 // UE's bit copy symbol — this may or may not be hooked depending on whether
 // the FastBitCopy runtime module successfully installed its hook.
@@ -256,4 +256,4 @@ bool FFastBitCopySpeed::RunTest(const FString& Parameters)
 	return true;
 }
 
-#endif // WITH_DEV_AUTOMATION_TESTS
+#endif // WITH_DEV_AUTOMATION_TESTS && PLATFORM_LITTLE_ENDIAN

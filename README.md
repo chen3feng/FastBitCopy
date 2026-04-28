@@ -51,9 +51,9 @@ x86-64 and arm64 we can do much better with aligned 64-bit loads/stores plus
 | **x86-64** |   ✅    |  ✅   |  ✅   |
 | **arm64**  |   ✅    |  ✅   |  ✅ (Apple Silicon) |
 
-Requires a little-endian CPU that allows unaligned loads
-(`PLATFORM_LITTLE_ENDIAN && PLATFORM_SUPPORTS_UNALIGNED_LOADS`). Both x64
-and arm64 qualify.
+Requires a little-endian CPU (`PLATFORM_LITTLE_ENDIAN`). Both x64
+and arm64 qualify. Unaligned loads/stores are handled via `memcpy`
+helpers, so no hardware unaligned-load support is required.
 
 > **Cross-platform correctness.** Both the byte-aligned and bit-unaligned
 > fast paths are compiled and exercised on all three host OSes in CI —

@@ -229,8 +229,6 @@ int main()
                 FastBitCopy_IsOptimizedBuild());
     std::printf("[info] PLATFORM_LITTLE_ENDIAN = %d\n",
                 (int)PLATFORM_LITTLE_ENDIAN);
-    std::printf("[info] PLATFORM_SUPPORTS_UNALIGNED_LOADS = %d\n",
-                (int)PLATFORM_SUPPORTS_UNALIGNED_LOADS);
 
     // Smoke test: byte-aligned 8-bit copy. If the function writes anything
     // at all, tmp[0] must end up 0xFF. A result of 0x00 means the optimized

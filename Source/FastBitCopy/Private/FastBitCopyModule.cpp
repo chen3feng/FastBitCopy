@@ -17,11 +17,10 @@ CORE_API void appBitsCpy(uint8* Dest, int32 DestBit, uint8* Src, int32 SrcBit, i
 
 // Build-path self-identification probe, defined in BitCopyFast.cpp. Returns 1
 // iff that translation unit compiled the real optimized path (the
-// PLATFORM_LITTLE_ENDIAN && PLATFORM_SUPPORTS_UNALIGNED_LOADS branch), 0 if
-// it compiled the fallback-to-stock path. Installing the hook in the fallback
-// case would create an infinite recursion (HookedAppBitsCpy ->
-// appBitsCpyFastImpl -> appBitsCpy -> HookedAppBitsCpy -> ...), so we gate
-// on this probe.
+// PLATFORM_LITTLE_ENDIAN branch), 0 if it compiled the fallback-to-stock
+// path. Installing the hook in the fallback case would create an infinite
+// recursion (HookedAppBitsCpy -> appBitsCpyFastImpl -> appBitsCpy ->
+// HookedAppBitsCpy -> ...), so we gate on this probe.
 int FastBitCopy_IsOptimizedBuild();
 
 namespace
@@ -38,7 +37,7 @@ namespace
 
 void FFastBitCopyModule::StartupModule()
 {
-#if PLATFORM_LITTLE_ENDIAN && PLATFORM_SUPPORTS_UNALIGNED_LOADS
+#if PLATFORM_LITTLE_ENDIAN
 	if (FastBitCopy_IsOptimizedBuild() == 0)
 	{
 		// BitCopyFast.cpp compiled the fallback path (appBitsCpyFastImpl

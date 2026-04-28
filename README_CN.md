@@ -53,8 +53,8 @@ UE 自带的 `appBitsCpy` 是逐字节处理的标量实现。在 x86-64 与 arm
 | **x86-64** |   ✅    |  ✅   |  ✅   |
 | **arm64**  |   ✅    |  ✅   |  ✅（Apple Silicon） |
 
-需要满足 `PLATFORM_LITTLE_ENDIAN && PLATFORM_SUPPORTS_UNALIGNED_LOADS`
-（x64、arm64 都满足）。
+需要满足 `PLATFORM_LITTLE_ENDIAN`（x64、arm64 都满足）。
+非对齐访问通过 `memcpy` 辅助函数处理，不依赖硬件非对齐加载支持。
 
 > **跨平台正确性。** 三大主机 OS 上 CI 都会在 `-O2` 下（MSVC / GCC /
 > Clang）编译并运行字节对齐与位不对齐两条快速路径，外加 Linux/macOS
