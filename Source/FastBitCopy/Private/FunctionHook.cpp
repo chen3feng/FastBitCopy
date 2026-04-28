@@ -19,6 +19,19 @@
 //          is supported; if the first 16 bytes contain a PC-relative branch
 //          / ADR / ADRP the hook will refuse to install (extremely unlikely
 //          for `appBitsCpy`, but we check anyway).
+//
+// Code organization
+// -----------------
+// To keep individual functions free of `#if PLATFORM_CPU_*`, the file is
+// organized in top-level architecture-specific blocks:
+//
+//   * Shared OS helpers      (AllocExecutable, FScopedUnprotect, ...)
+//   * x86_64 block           (InstrLen, Relocate, InstallHook_X64)
+//   * aarch64 block          (IsRelocatableInsn, InstallHook_Arm64)
+//   * Common dispatch entry  (FFunctionHook::Install / Uninstall)
+//
+// Each per-arch `InstallHook_*` returns a small `FInstallResult` value; the
+// dispatcher copies its fields into the owning `FFunctionHook` instance.
 
 #include "FunctionHook.h"
 
@@ -43,11 +56,22 @@
 #endif
 
 // ----------------------------------------------------------------------------
-// Platform helpers: allocate RWX memory, change page permissions, flush icache
+// Shared OS helpers: allocate RWX memory, change page permissions, flush icache
+// (architecture-agnostic)
 // ----------------------------------------------------------------------------
 
 namespace FastBitCopyHookPrivate
 {
+	/** Result produced by an arch-specific installer; copied back into the owning FFunctionHook. */
+	struct FInstallResult
+	{
+		void *TargetAddr = nullptr;
+		void *TrampolineMem = nullptr;
+		uint8 OriginalBytes[32] = {};
+		int32 PatchSize = 0;
+		bool bOk = false;
+	};
+
 	static SIZE_T GetPageSize()
 	{
 #if PLATFORM_WINDOWS
@@ -204,25 +228,32 @@ namespace FastBitCopyHookPrivate
 		__builtin___clear_cache((char*)Addr, (char*)Addr + Size);
 #endif
 	}
+} // namespace FastBitCopyHookPrivate
 
-	// -----------------------------------------------------------------------
-	// x86_64 encoders
-	// -----------------------------------------------------------------------
+// ============================================================================
+// x86_64 block
+// ============================================================================
 #if PLATFORM_CPU_X86_FAMILY
+namespace FastBitCopyHookPrivate
+{
 	// Write a 5-byte `E9 rel32` jmp at `At` targeting `To`.
-	static void WriteJmpRel32(uint8* At, void* To)
+	static void WriteJmpRel32(uint8 *At, void *To)
 	{
 		int64 Rel = (int64)((intptr_t)To - (intptr_t)At - 5);
 		At[0] = 0xE9;
-		*(int32*)(At + 1) = (int32)Rel;
+		*(int32 *)(At + 1) = (int32)Rel;
 	}
 
 	// Write a 14-byte absolute `FF 25 00 00 00 00 | imm64` jmp at `At` targeting `To`.
-	static void WriteJmpAbs14(uint8* At, void* To)
+	static void WriteJmpAbs14(uint8 *At, void *To)
 	{
-		At[0] = 0xFF; At[1] = 0x25;
-		At[2] = 0x00; At[3] = 0x00; At[4] = 0x00; At[5] = 0x00;
-		*(uint64*)(At + 6) = (uint64)(uintptr_t)To;
+		At[0] = 0xFF;
+		At[1] = 0x25;
+		At[2] = 0x00;
+		At[3] = 0x00;
+		At[4] = 0x00;
+		At[5] = 0x00;
+		*(uint64 *)(At + 6) = (uint64)(uintptr_t)To;
 	}
 
 	// Extremely small length-disassembler: just enough to figure out how many
@@ -231,7 +262,7 @@ namespace FastBitCopyHookPrivate
 	//   push/pop reg, mov reg,reg, sub/add reg,imm, lea, endbr64, nop,
 	//   rex-prefix + above, 0F 1F .. (multi-byte NOPs), cld, etc.
 	// If it sees something it doesn't understand it returns 0.
-	static int InstrLen(const uint8* P)
+	static int InstrLen(const uint8 *P)
 	{
 		int Len = 0;
 		bool bHasOperandSize = false;
@@ -240,32 +271,60 @@ namespace FastBitCopyHookPrivate
 		while (true)
 		{
 			uint8 b = P[Len];
-			if (b == 0x66) { bHasOperandSize = true; ++Len; continue; }
-			if (b == 0x67) { bHasAddressSize = true; ++Len; continue; }
-			if (b == 0xF0 || b == 0xF2 || b == 0xF3) { ++Len; continue; }
-			if (b == 0x2E || b == 0x36 || b == 0x3E || b == 0x26 || b == 0x64 || b == 0x65) { ++Len; continue; }
+			if (b == 0x66)
+			{
+				bHasOperandSize = true;
+				++Len;
+				continue;
+			}
+			if (b == 0x67)
+			{
+				bHasAddressSize = true;
+				++Len;
+				continue;
+			}
+			if (b == 0xF0 || b == 0xF2 || b == 0xF3)
+			{
+				++Len;
+				continue;
+			}
+			if (b == 0x2E || b == 0x36 || b == 0x3E || b == 0x26 || b == 0x64 || b == 0x65)
+			{
+				++Len;
+				continue;
+			}
 			break;
 		}
 		// REX
 		bool bHasRex = false;
-		if ((P[Len] & 0xF0) == 0x40) { bHasRex = true; ++Len; }
+		if ((P[Len] & 0xF0) == 0x40)
+		{
+			bHasRex = true;
+			++Len;
+		}
 
 		uint8 Op = P[Len++];
 
 		auto ModRMSize = [&](uint8 Mod, uint8 RM) -> int
 		{
 			int S = 1; // modrm itself
-			if (Mod == 3) return S;
+			if (Mod == 3)
+				return S;
 			bool bHasSIB = (RM == 4);
-			if (bHasSIB) S += 1;
-			if (Mod == 1) S += 1;
-			else if (Mod == 2) S += 4;
-			else if (Mod == 0 && RM == 5) S += 4; // rip-relative or disp32
+			if (bHasSIB)
+				S += 1;
+			if (Mod == 1)
+				S += 1;
+			else if (Mod == 2)
+				S += 4;
+			else if (Mod == 0 && RM == 5)
+				S += 4; // rip-relative or disp32
 			else if (Mod == 0 && bHasSIB)
 			{
 				uint8 SIB = P[Len];
 				uint8 Base = SIB & 7;
-				if (Base == 5) S += 4;
+				if (Base == 5)
+					S += 4;
 			}
 			return S;
 		};
@@ -274,7 +333,7 @@ namespace FastBitCopyHookPrivate
 		{
 			uint8 MR = P[Len];
 			uint8 Mod = (MR >> 6) & 3;
-			uint8 RM  = MR & 7;
+			uint8 RM = MR & 7;
 			Len += ModRMSize(Mod, RM);
 			Len += ImmSize;
 		};
@@ -283,10 +342,22 @@ namespace FastBitCopyHookPrivate
 		switch (Op)
 		{
 		// 1-byte opcodes, no operand
-		case 0x50: case 0x51: case 0x52: case 0x53:
-		case 0x54: case 0x55: case 0x56: case 0x57: // push r64
-		case 0x58: case 0x59: case 0x5A: case 0x5B:
-		case 0x5C: case 0x5D: case 0x5E: case 0x5F: // pop r64
+		case 0x50:
+		case 0x51:
+		case 0x52:
+		case 0x53:
+		case 0x54:
+		case 0x55:
+		case 0x56:
+		case 0x57: // push r64
+		case 0x58:
+		case 0x59:
+		case 0x5A:
+		case 0x5B:
+		case 0x5C:
+		case 0x5D:
+		case 0x5E:
+		case 0x5F: // pop r64
 		case 0x90: // nop
 		case 0x98: // cbw/cwde/cdqe
 		case 0x99: // cwd/cdq/cqo
@@ -380,8 +451,14 @@ namespace FastBitCopyHookPrivate
 		}
 
 		// MOV reg, imm32 (B8+rd)
-		case 0xB8: case 0xB9: case 0xBA: case 0xBB:
-		case 0xBC: case 0xBD: case 0xBE: case 0xBF:
+		case 0xB8:
+		case 0xB9:
+		case 0xBA:
+		case 0xBB:
+		case 0xBC:
+		case 0xBD:
+		case 0xBE:
+		case 0xBF:
 			Len += bHasRex ? 8 : (bHasOperandSize ? 2 : 4);
 			return Len;
 
@@ -410,9 +487,21 @@ namespace FastBitCopyHookPrivate
 		// 0B /r  or r, r/m
 		// 21 /r  and r/m, r
 		// 23 /r  and r, r/m
-		case 0x88: case 0x89: case 0x8A: case 0x8B: case 0x8D:
-		case 0x85: case 0x31: case 0x01: case 0x29: case 0x39:
-		case 0x84: case 0x30: case 0x00: case 0x28: case 0x38:
+		case 0x88:
+		case 0x89:
+		case 0x8A:
+		case 0x8B:
+		case 0x8D:
+		case 0x85:
+		case 0x31:
+		case 0x01:
+		case 0x29:
+		case 0x39:
+		case 0x84:
+		case 0x30:
+		case 0x00:
+		case 0x28:
+		case 0x38:
 		case 0x3A:
 		case 0x3B:
 		case 0x09:
@@ -491,9 +580,6 @@ namespace FastBitCopyHookPrivate
 		}
 	}
 
-	// -----------------------------------------------------------------------
-	// x86_64 trampoline relocation
-	// -----------------------------------------------------------------------
 	// After copying the displaced prologue bytes into the trampoline, any
 	// PC-relative instruction (Jcc rel8/rel32, JMP rel8/rel32, CALL rel32,
 	// RIP-relative ModRM) must have its offset adjusted because the
@@ -597,21 +683,123 @@ namespace FastBitCopyHookPrivate
 			Off += N;
 		}
 	}
+
+	// x86_64 installer. Writes the result into `Out`; returns Out.bOk.
+	static FInstallResult InstallHook_X64(void *Target, void *Detour)
+	{
+		FInstallResult R;
+
+		// Step 1: figure out how many bytes of prologue we need to relocate.
+		uint8 *T = (uint8 *)Target;
+		int32 Needed = 5; // E9 rel32
+		const int32 MaxNeeded = 14;
+		int32 Copied = 0;
+		while (Copied < Needed)
+		{
+			int N = InstrLen(T + Copied);
+			if (N <= 0)
+			{
+				// Can't decode; fall back to abs 14-byte patch which always works
+				// if the prologue has at least 14 safe bytes — but we can't verify
+				// without decoding, so fail safely.
+				if (Needed == 5)
+				{
+					// try again demanding more so we can attempt absolute jump
+					Needed = MaxNeeded;
+					continue;
+				}
+				UE_LOG(LogTemp, Warning,
+					   TEXT("FastBitCopy: InstrLen failed at offset %d, byte=0x%02X. "
+							"Cannot decode prologue for hook installation."),
+					   Copied, T[Copied]);
+				return R;
+			}
+			Copied += N;
+		}
+
+		R.PatchSize = Copied;
+		check(R.PatchSize <= (int32)sizeof(R.OriginalBytes));
+		FMemory::Memcpy(R.OriginalBytes, T, R.PatchSize);
+
+		// Step 2: allocate an executable trampoline (PatchSize + 14 bytes for abs jump back)
+		SIZE_T TrampSize = (SIZE_T)R.PatchSize + 14;
+		void *Tramp = AllocExecutable(Target, TrampSize);
+		if (!Tramp)
+			return R;
+		FMemory::Memcpy(Tramp, R.OriginalBytes, R.PatchSize);
+		RelocateTrampoline((uint8 *)Tramp, T, R.PatchSize);
+		WriteJmpAbs14((uint8 *)Tramp + R.PatchSize, (uint8 *)Target + R.PatchSize);
+
+		// Step 3: patch the prologue.
+		{
+			FScopedUnprotect Unprot(Target, (SIZE_T)R.PatchSize);
+			int64 Rel = (int64)((intptr_t)Detour - (intptr_t)Target - 5);
+			if (Needed == 5 && Rel >= INT32_MIN && Rel <= INT32_MAX)
+			{
+				WriteJmpRel32(T, Detour);
+				// Pad the rest with NOPs so a debugger / profiler sees clean insns.
+				for (int32 i = 5; i < R.PatchSize; ++i)
+					T[i] = 0x90;
+			}
+			else
+			{
+				// Absolute 14-byte jump.
+				if (R.PatchSize < 14)
+				{
+					// We need 14 bytes but only decoded fewer; extend by decoding more
+					while (Copied < 14)
+					{
+						int N = InstrLen(T + Copied);
+						if (N <= 0)
+						{
+							FreeExecutable(Tramp, TrampSize);
+							return R;
+						}
+						Copied += N;
+					}
+					// Reallocate trampoline with new PatchSize
+					FreeExecutable(Tramp, TrampSize);
+					R.PatchSize = Copied;
+					FMemory::Memcpy(R.OriginalBytes, T, R.PatchSize);
+					TrampSize = (SIZE_T)R.PatchSize + 14;
+					Tramp = AllocExecutable(Target, TrampSize);
+					if (!Tramp)
+						return R;
+					FMemory::Memcpy(Tramp, R.OriginalBytes, R.PatchSize);
+					RelocateTrampoline((uint8 *)Tramp, T, R.PatchSize);
+					WriteJmpAbs14((uint8 *)Tramp + R.PatchSize, (uint8 *)Target + R.PatchSize);
+				}
+				WriteJmpAbs14(T, Detour);
+				for (int32 i = 14; i < R.PatchSize; ++i)
+					T[i] = 0x90;
+			}
+		}
+		FlushIcache(Target, (SIZE_T)R.PatchSize);
+		FlushIcache(Tramp, TrampSize);
+
+		R.TargetAddr = Target;
+		R.TrampolineMem = Tramp;
+		R.bOk = true;
+		return R;
+	}
+} // namespace FastBitCopyHookPrivate
 #endif // PLATFORM_CPU_X86_FAMILY
 
-	// -----------------------------------------------------------------------
-	// aarch64 encoders
-	// -----------------------------------------------------------------------
+// ============================================================================
+// aarch64 block
+// ============================================================================
 #if PLATFORM_CPU_ARM_FAMILY
+namespace FastBitCopyHookPrivate
+{
 	// Encode 16 bytes:
 	//   LDR  X16, #8    ; 58000050
 	//   BR   X16        ; D61F0200
 	//   <imm64>
-	static void WriteJmpAbs16(uint8* At, void* To)
+	static void WriteJmpAbs16(uint8 *At, void *To)
 	{
-		*(uint32*)(At + 0) = 0x58000050u;
-		*(uint32*)(At + 4) = 0xD61F0200u;
-		*(uint64*)(At + 8) = (uint64)(uintptr_t)To;
+		*(uint32 *)(At + 0) = 0x58000050u;
+		*(uint32 *)(At + 4) = 0xD61F0200u;
+		*(uint64 *)(At + 8) = (uint64)(uintptr_t)To;
 	}
 
 	// Reject instructions whose encoding is PC-relative and therefore would
@@ -621,165 +809,118 @@ namespace FastBitCopyHookPrivate
 	{
 		// B       000101 imm26            -> top 6 bits 000101 (0x14000000..)
 		// BL      100101 imm26            -> top 6 bits 100101 (0x94000000..)
-		if ((Insn & 0x7C000000u) == 0x14000000u) return false; // B / BL
+		if ((Insn & 0x7C000000u) == 0x14000000u)
+			return false; // B / BL
 		// B.cond  01010100 .............. -> 0x54xxxxxx
-		if ((Insn & 0xFF000010u) == 0x54000000u) return false;
+		if ((Insn & 0xFF000010u) == 0x54000000u)
+			return false;
 		// CBZ/CBNZ  x0110100 / x0110101
-		if ((Insn & 0x7E000000u) == 0x34000000u) return false;
+		if ((Insn & 0x7E000000u) == 0x34000000u)
+			return false;
 		// TBZ/TBNZ  x0110110 / x0110111
-		if ((Insn & 0x7E000000u) == 0x36000000u) return false;
+		if ((Insn & 0x7E000000u) == 0x36000000u)
+			return false;
 		// ADR / ADRP  0xx10000 ...
-		if ((Insn & 0x1F000000u) == 0x10000000u) return false;
+		if ((Insn & 0x1F000000u) == 0x10000000u)
+			return false;
 		// LDR (literal)  0x011000 ...  (01011000 / 00011000 / 10011000 / ...)
-		if ((Insn & 0x3B000000u) == 0x18000000u) return false;
+		if ((Insn & 0x3B000000u) == 0x18000000u)
+			return false;
 		return true;
 	}
-#endif
+
+	// aarch64 installer.
+	static FInstallResult InstallHook_Arm64(void *Target, void *Detour)
+	{
+		FInstallResult R;
+
+		// Validate and copy the first 16 bytes (4 instructions).
+		const int32 kPatch = 16;
+		uint32 *T32 = (uint32 *)Target;
+		for (int32 i = 0; i < 4; ++i)
+		{
+			if (!IsRelocatableInsn(T32[i]))
+			{
+				return R;
+			}
+		}
+		R.PatchSize = kPatch;
+		FMemory::Memcpy(R.OriginalBytes, Target, kPatch);
+
+		const SIZE_T TrampSize = (SIZE_T)kPatch + 16; // prologue + abs-16 jump back
+		void *Tramp = AllocExecutable(Target, TrampSize);
+		if (!Tramp)
+			return R;
+
+		{
+			// Trampoline is already RWX (or we need to toggle on Apple Silicon via FScopedUnprotect
+			// logic — AllocExecutable requested RX on mac-arm64). So unprotect to write.
+			FScopedUnprotect Unprot(Tramp, TrampSize, /*bIsJitPage=*/true);
+			FMemory::Memcpy(Tramp, R.OriginalBytes, kPatch);
+			WriteJmpAbs16((uint8 *)Tramp + kPatch, (uint8 *)Target + kPatch);
+		}
+		FlushIcache(Tramp, TrampSize);
+
+		{
+			FScopedUnprotect Unprot(Target, (SIZE_T)kPatch);
+			WriteJmpAbs16((uint8 *)Target, Detour);
+		}
+		FlushIcache(Target, (SIZE_T)kPatch);
+
+		R.TargetAddr = Target;
+		R.TrampolineMem = Tramp;
+		R.bOk = true;
+		return R;
+	}
 } // namespace FastBitCopyHookPrivate
+#endif // PLATFORM_CPU_ARM_FAMILY
+
+// ============================================================================
+// Common dispatch entry points
+// ============================================================================
 
 using namespace FastBitCopyHookPrivate;
 
-FFunctionHook::FFunctionHook()  = default;
-FFunctionHook::~FFunctionHook() { if (bInstalled) Uninstall(); }
+FFunctionHook::FFunctionHook() = default;
+FFunctionHook::~FFunctionHook()
+{
+	if (bInstalled)
+		Uninstall();
+}
 
-bool FFunctionHook::Install(void* Target, void* Detour, void** OutTrampoline)
+bool FFunctionHook::Install(void *Target, void *Detour, void **OutTrampoline)
 {
 	check(Target);
 	check(Detour);
-	if (bInstalled) return false;
+	if (bInstalled)
+		return false;
 
 #if PLATFORM_CPU_X86_FAMILY
-	// Step 1: figure out how many bytes of prologue we need to relocate.
-	uint8* T = (uint8*)Target;
-	int32 Needed = 5; // E9 rel32
-	const int32 MaxNeeded = 14;
-	int32 Copied = 0;
-	while (Copied < Needed)
-	{
-		int N = InstrLen(T + Copied);
-		if (N <= 0)
-		{
-			// Can't decode; fall back to abs 14-byte patch which always works
-			// if the prologue has at least 14 safe bytes — but we can't verify
-			// without decoding, so fail safely.
-			if (Needed == 5)
-			{
-				// try again demanding more so we can attempt absolute jump
-				Needed = MaxNeeded;
-				continue;
-			}
-			UE_LOG(LogTemp, Warning,
-				   TEXT("FastBitCopy: InstrLen failed at offset %d, byte=0x%02X. "
-						"Cannot decode prologue for hook installation."),
-				   Copied, T[Copied]);
-			return false;
-		}
-		Copied += N;
-	}
-
-	PatchSize = Copied;
-	check(PatchSize <= (int32)sizeof(OriginalBytes));
-	FMemory::Memcpy(OriginalBytes, T, PatchSize);
-
-	// Step 2: allocate an executable trampoline (PatchSize + 14 bytes for abs jump back)
-	const SIZE_T TrampSize = (SIZE_T)PatchSize + 14;
-	void* Tramp = AllocExecutable(Target, TrampSize);
-	if (!Tramp) return false;
-	FMemory::Memcpy(Tramp, OriginalBytes, PatchSize);
-	RelocateTrampoline((uint8 *)Tramp, T, PatchSize);
-	WriteJmpAbs14((uint8*)Tramp + PatchSize, (uint8*)Target + PatchSize);
-
-	// Step 3: patch the prologue.
-	{
-		FScopedUnprotect Unprot(Target, (SIZE_T)PatchSize);
-		int64 Rel = (int64)((intptr_t)Detour - (intptr_t)Target - 5);
-		if (Needed == 5 && Rel >= INT32_MIN && Rel <= INT32_MAX)
-		{
-			WriteJmpRel32(T, Detour);
-			// Pad the rest with NOPs so a debugger / profiler sees clean insns.
-			for (int32 i = 5; i < PatchSize; ++i) T[i] = 0x90;
-		}
-		else
-		{
-			// Absolute 14-byte jump.
-			if (PatchSize < 14)
-			{
-				// We need 14 bytes but only decoded fewer; extend by decoding more
-				while (Copied < 14)
-				{
-					int N = InstrLen(T + Copied);
-					if (N <= 0) { FreeExecutable(Tramp, TrampSize); return false; }
-					Copied += N;
-				}
-				// Reallocate trampoline with new PatchSize
-				FreeExecutable(Tramp, TrampSize);
-				PatchSize = Copied;
-				FMemory::Memcpy(OriginalBytes, T, PatchSize);
-				const SIZE_T TrampSize2 = (SIZE_T)PatchSize + 14;
-				Tramp = AllocExecutable(Target, TrampSize2);
-				if (!Tramp) return false;
-				FMemory::Memcpy(Tramp, OriginalBytes, PatchSize);
-				RelocateTrampoline((uint8 *)Tramp, T, PatchSize);
-				WriteJmpAbs14((uint8*)Tramp + PatchSize, (uint8*)Target + PatchSize);
-			}
-			WriteJmpAbs14(T, Detour);
-			for (int32 i = 14; i < PatchSize; ++i) T[i] = 0x90;
-		}
-	}
-	FlushIcache(Target, (SIZE_T)PatchSize);
-	FlushIcache(Tramp, TrampSize);
-
-	TargetAddr    = Target;
-	TrampolineMem = Tramp;
-	if (OutTrampoline) *OutTrampoline = Tramp;
-	bInstalled = true;
-	return true;
-
+	const FInstallResult R = InstallHook_X64(Target, Detour);
 #elif PLATFORM_CPU_ARM_FAMILY
-	// Validate and copy the first 16 bytes (4 instructions).
-	const int32 kPatch = 16;
-	uint32* T32 = (uint32*)Target;
-	for (int32 i = 0; i < 4; ++i)
-	{
-		if (!IsRelocatableInsn(T32[i]))
-		{
-			return false;
-		}
-	}
-	PatchSize = kPatch;
-	FMemory::Memcpy(OriginalBytes, Target, kPatch);
-
-	const SIZE_T TrampSize = (SIZE_T)kPatch + 16; // prologue + abs-16 jump back
-	void* Tramp = AllocExecutable(Target, TrampSize);
-	if (!Tramp) return false;
-
-	{
-		// Trampoline is already RWX (or we need to toggle on Apple Silicon via FScopedUnprotect
-		// logic — AllocExecutable requested RX on mac-arm64). So unprotect to write.
-		FScopedUnprotect Unprot(Tramp, TrampSize, /*bIsJitPage=*/true);
-		FMemory::Memcpy(Tramp, OriginalBytes, kPatch);
-		WriteJmpAbs16((uint8*)Tramp + kPatch, (uint8*)Target + kPatch);
-	}
-	FlushIcache(Tramp, TrampSize);
-
-	{
-		FScopedUnprotect Unprot(Target, (SIZE_T)kPatch);
-		WriteJmpAbs16((uint8*)Target, Detour);
-	}
-	FlushIcache(Target, (SIZE_T)kPatch);
-
-	TargetAddr    = Target;
-	TrampolineMem = Tramp;
-	if (OutTrampoline) *OutTrampoline = Tramp;
-	bInstalled = true;
-	return true;
-
+	const FInstallResult R = InstallHook_Arm64(Target, Detour);
 #else
 	(void)Target; (void)Detour; (void)OutTrampoline;
 	return false;
 #endif
-}
 
+#if PLATFORM_CPU_X86_FAMILY || PLATFORM_CPU_ARM_FAMILY
+	if (!R.bOk)
+		return false;
+
+	TargetAddr = R.TargetAddr;
+	TrampolineMem = R.TrampolineMem;
+	PatchSize = R.PatchSize;
+	FMemory::Memcpy(OriginalBytes, R.OriginalBytes, (SIZE_T)PatchSize);
+	bInstalled = true;
+
+	if (OutTrampoline)
+		*OutTrampoline = TrampolineMem;
+	return true;
+#endif
+	// Unreachable on supported platforms; keeps the compiler happy.
+	return false;
+}
 bool FFunctionHook::Uninstall()
 {
 	if (!bInstalled) return false;
