@@ -2,17 +2,17 @@
 setlocal enabledelayedexpansion
 
 REM ============================================================
-REM  build_testhost.bat — Build & test FastBitCopy TestHost (Windows)
+REM  build_testhost.bat - Build & test FastBitCopy TestHost (Windows)
 REM
 REM  Reads ENGINE_ROOT from .env (if present), otherwise defaults
 REM  to ..\UnrealEngine (sibling directory).
 REM
 REM  Usage:
-REM    build_testhost.bat                     — Editor (Development)
-REM    build_testhost.bat Game                — Game client (Development)
-REM    build_testhost.bat Editor Shipping     — Editor (Shipping)
-REM    build_testhost.bat Game Shipping       — Game client (Shipping)
-REM    build_testhost.bat test                — Build Editor + run automation tests
+REM    build_testhost.bat                     - Editor (Development)
+REM    build_testhost.bat Game                - Game client (Development)
+REM    build_testhost.bat Editor Shipping     - Editor (Shipping)
+REM    build_testhost.bat Game Shipping       - Game client (Shipping)
+REM    build_testhost.bat test                - Build Editor + run automation tests
 REM ============================================================
 
 set "SCRIPT_DIR=%~dp0"
@@ -118,7 +118,7 @@ echo === Step 1/2: Building Editor target ===
 echo.
 call "%BUILD_BAT%" FastBitCopyHostEditor Win64 Development -project="%PROJECT%"
 if errorlevel 1 (
-    echo BUILD FAILED — cannot run tests.
+echo BUILD FAILED - cannot run tests.
     exit /b 1
 )
 
@@ -132,13 +132,28 @@ if not exist "%EDITOR_CMD%" (
     exit /b 1
 )
 
-"%EDITOR_CMD%" "%PROJECT%" -ExecCmds="Automation RunTests FastBitCopy" -unattended -NoPause -NullRHI -log
-if errorlevel 1 (
+REM Test report export dir (useful for CI artifacts)
+set "REPORT_DIR=%SCRIPT_DIR%\TestHost\Saved\Automation\Reports"
+if not exist "%REPORT_DIR%" mkdir "%REPORT_DIR%"
+
+REM Headless flags: keep us off all UI/audio subsystems.
+REM -NullRHI / -nosound / -nosplash mirror the Unix script and avoid Slate
+REM side-effects in commandlet mode.
+"%EDITOR_CMD%" "%PROJECT%" ^
+    -ExecCmds="Automation RunTests FastBitCopy; Quit" ^
+    -TestExit="Automation Test Queue Empty" ^
+    -ReportExportPath="%REPORT_DIR%" ^
+    -unattended -NoPause -NullRHI -nosound -nosplash -nop4 -NoSourceControl -log
+set "TEST_EXIT=%errorlevel%"
+
+if not "%TEST_EXIT%"=="0" (
     echo.
-    echo TESTS FAILED
-    exit /b 1
+    echo TESTS FAILED (exit code %TEST_EXIT%)
+    echo Report dir: %REPORT_DIR%
+    exit /b %TEST_EXIT%
 )
 
 echo.
 echo ALL TESTS PASSED
+echo Report dir: %REPORT_DIR%
 exit /b 0

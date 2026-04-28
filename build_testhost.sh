@@ -111,17 +111,58 @@ if [[ "${TARGET_TYPE_LOWER}" == "test" ]]; then
         EDITOR_CMD="${ENGINE_ROOT}/Engine/Binaries/Linux/UnrealEditor"
     fi
 
-    if [[ ! -f "${EDITOR_CMD}" ]]; then
-        echo "ERROR: UnrealEditor-Cmd not found at ${EDITOR_CMD}"
+    if [[ ! -x "${EDITOR_CMD}" ]]; then
+        if [[ "${PLATFORM}" == "Mac" ]]; then
+            echo "ERROR: UnrealEditor-Cmd not found or not executable at ${EDITOR_CMD}"
+        else
+            echo "ERROR: UnrealEditor not found or not executable at ${EDITOR_CMD}"
+        fi
         exit 1
     fi
 
+    # Test report export dir (useful for CI artifacts)
+    REPORT_DIR="${SCRIPT_DIR}/TestHost/Saved/Automation/Reports"
+    mkdir -p "${REPORT_DIR}"
+
+    # Common flags for headless automation.
+    # -NullRHI / -nosound / -nosplash keep us off all UI/audio subsystems.
+    # On macOS this also dodges a known crash in FSlateMacMenu::UpdateWithMultiBox
+    # (Cocoa main-menu sync on a dangling TSharedPtr) that surfaces in commandlet mode.
+    COMMON_FLAGS=(
+        -unattended
+        -NoPause
+        -NullRHI
+        -nosound
+        -nosplash
+        -nop4
+        -NoSourceControl
+        -log
+    )
+
+    # Disable Mac's Cocoa main menu rebuild path where supported; harmless on Linux.
+    if [[ "${PLATFORM}" == "Mac" ]]; then
+        COMMON_FLAGS+=( -NoSlateRenderer )
+    fi
+
+    set +e
     "${EDITOR_CMD}" "${PROJECT}" \
-        -ExecCmds="Automation RunTests FastBitCopy" \
-        -unattended -NoPause -NullRHI -log
+        -ExecCmds="Automation RunTests FastBitCopy; Quit" \
+        -TestExit="Automation Test Queue Empty" \
+        -ReportExportPath="${REPORT_DIR}" \
+        "${COMMON_FLAGS[@]}"
+    TEST_EXIT=$?
+    set -e
+
+    if [[ ${TEST_EXIT} -ne 0 ]]; then
+        echo ""
+        echo "TESTS FAILED (exit code ${TEST_EXIT})"
+        echo "Report dir: ${REPORT_DIR}"
+        exit ${TEST_EXIT}
+    fi
 
     echo ""
     echo "ALL TESTS PASSED"
+    echo "Report dir: ${REPORT_DIR}"
     exit 0
 fi
 
