@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 
 REM ============================================================
-REM  run_testhost.bat — Build & run FastBitCopy TestHost tests (Windows)
+REM  run_testhost.bat - Build & run FastBitCopy TestHost tests (Windows)
 REM
 REM  Covers both Editor (dynamic linking) and Game (static linking) targets.
 REM
@@ -10,10 +10,10 @@ REM  Reads ENGINE_ROOT from .env (if present), otherwise defaults
 REM  to ..\UnrealEngine (sibling directory).
 REM
 REM  Usage:
-REM    run_testhost.bat              — Run all (Editor build+test, Game build)
-REM    run_testhost.bat editor       — Editor only: build + automation tests
-REM    run_testhost.bat game         — Game only: build (link verification)
-REM    run_testhost.bat --no-build   — Skip build, run Editor tests only
+REM    run_testhost.bat              - Run all (Editor build+test, Game build)
+REM    run_testhost.bat editor       - Editor only: build + automation tests
+REM    run_testhost.bat game         - Game only: build (link verification)
+REM    run_testhost.bat --no-build   - Skip build, run Editor tests only
 REM ============================================================
 
 set "SCRIPT_DIR=%~dp0"
@@ -95,7 +95,7 @@ set "FAILURES=0"
 
 echo.
 echo ############################################################
-echo #  FastBitCopy TestHost — Full Test Suite (Windows)
+echo #  FastBitCopy TestHost - Full Test Suite (Windows)
 echo #  ENGINE_ROOT: %ENGINE_ROOT%
 echo ############################################################
 
@@ -118,7 +118,7 @@ echo.
 echo === [2/%TOTAL_STEPS%] Running Editor automation tests ===
 echo.
 if not exist "%EDITOR_CMD%" (
-    echo [SKIP] UnrealEditor-Cmd.exe not found — cannot run automation tests
+echo [SKIP] UnrealEditor-Cmd.exe not found - cannot run automation tests
     set /a FAILURES+=1
     goto :SkipEditorTest
 )
@@ -157,7 +157,7 @@ set "FAILURES=0"
 
 echo.
 echo ############################################################
-echo #  FastBitCopy TestHost — Editor Tests (Windows)
+echo #  FastBitCopy TestHost - Editor Tests (Windows)
 echo #  ENGINE_ROOT: %ENGINE_ROOT%
 echo ############################################################
 
@@ -167,7 +167,7 @@ echo.
 call "%BUILD_BAT%" FastBitCopyHostEditor Win64 Development -project="%PROJECT%"
 if errorlevel 1 (
     echo.
-    echo [FAIL] Editor build failed — cannot run tests.
+echo [FAIL] Editor build failed - cannot run tests.
     exit /b 1
 )
 echo.
@@ -199,7 +199,7 @@ set "FAILURES=0"
 
 echo.
 echo ############################################################
-echo #  FastBitCopy TestHost — Game Build (Windows)
+echo #  FastBitCopy TestHost - Game Build (Windows)
 echo #  ENGINE_ROOT: %ENGINE_ROOT%
 echo ############################################################
 
@@ -225,7 +225,7 @@ set "FAILURES=0"
 
 echo.
 echo ############################################################
-echo #  FastBitCopy TestHost — Run Tests Only (Windows)
+echo #  FastBitCopy TestHost - Run Tests Only (Windows)
 echo #  ENGINE_ROOT: %ENGINE_ROOT%
 echo ############################################################
 

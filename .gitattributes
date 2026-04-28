@@ -1,0 +1,34 @@
+# Conservative .gitattributes: only enforce line endings on shell scripts,
+# so that the rest of the repo keeps its current normalization behaviour.
+# Rationale: *.bat / *.cmd / *.ps1 MUST be CRLF on disk, otherwise cmd.exe
+# mis-parses `setlocal enabledelayedexpansion` and similar lines. *.sh MUST
+# be LF so that Linux/macOS shells can execute them.
+
+# Windows shell scripts: always CRLF on checkout, regardless of core.autocrlf.
+*.bat    text eol=crlf
+*.cmd    text eol=crlf
+*.ps1    text eol=crlf
+
+# Unix shell scripts: always LF on checkout.
+*.sh     text eol=lf
+
+# Explicit binary types - never apply text conversions to these.
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.bmp    binary
+*.ico    binary
+*.tga    binary
+*.psd    binary
+*.uasset binary
+*.umap   binary
+*.zip    binary
+*.7z     binary
+*.gz     binary
+*.dll    binary
+*.exe    binary
+*.pdb    binary
+*.lib    binary
+*.so     binary
+*.dylib  binary
