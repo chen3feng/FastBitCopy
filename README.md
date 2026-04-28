@@ -69,12 +69,12 @@ and arm64 qualify.
 > earlier `-O2` divergence on GCC/Clang that was resolved before the
 > standalone CI job became blocking. The root causes were a
 > dangling-reference bug in the CI shim's `FMath::Min`/`Max` (PR #6)
-> and an alignment-UB in `CopyBitsSrcAligned` (PR #7). The per-function
-> `optnone`/`optimize("O0")` override and the `noinline` attribute have
-> both been removed (PRs #9 and #10). One lightweight defensive barrier
-> remains — an inline-asm `"memory"` compiler barrier between the
-> leading-byte `uint8*` fixup and the `uint64*` bulk copy — and will be
-> removed in a follow-up PR once verified.
+> and an alignment-UB in `CopyBitsSrcAligned` (PR #7). All three
+> defensive compile-time barriers that were added as workarounds
+> (`FASTBITCOPY_SAFE_OPT`, `FASTBITCOPY_NOINLINE`, and the inline-asm
+> `"memory"` compiler barrier) have since been removed (PRs #9, #10,
+> #11) with CI remaining green at each step, confirming the fixes
+> addressed the true root causes.
 
 ## Installation
 

@@ -69,10 +69,10 @@ UE 自带的 `appBitsCpy` 是逐字节处理的标量实现。在 x86-64 与 arm
 > GCC/Clang `-O2` 下位不对齐路径与引用实现不一致的问题，在
 > standalone CI job 转为阻塞门禁之前已得到解决。根本原因是 CI shim
 > 中 `FMath::Min`/`Max` 的悬垂引用（PR #6）以及 `CopyBitsSrcAligned`
-> 中的对齐 UB（PR #7）。逐函数 `optnone`/`optimize("O0")` 覆盖和
-> `noinline` 属性均已移除（PR #9 和 #10）。剩余一道轻量防御屏障——
-> 前导字节 `uint8*` 修正与 `uint64*` 批量拷贝之间的内联汇编
-> `"memory"` 编译器屏障——将在验证后的后续 PR 中移除。
+> 中的对齐 UB（PR #7）。作为临时方案添加的三道防御性编译时屏障
+> （`FASTBITCOPY_SAFE_OPT`、`FASTBITCOPY_NOINLINE`、内联汇编
+> `"memory"` 编译器屏障）已全部移除（PR #9、#10、#11），每一步 CI
+> 均保持全绿，确认修复针对的是真正的根因。
 
 ## 安装
 

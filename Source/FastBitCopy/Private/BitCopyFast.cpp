@@ -7,23 +7,16 @@
 #include "BitCopyFast.h"
 #include "CoreMinimal.h"
 #include "Math/UnrealMathUtility.h"
-#include <atomic>
 #include <cstring>
 
-// A *real* compiler barrier. std::atomic_signal_fence turned out to be
-// insufficient on Clang/GCC -O2 (it disciplines reorderings with respect to
-// signal handlers, but doesn't stop the optimizer from concluding that a
-// uint8* store cannot affect a subsequent uint64* read). An inline-asm
-// memory clobber, on the other hand, forces the compiler to treat every
-// reachable memory location as potentially read/written.
-#if defined(__GNUC__) || defined(__clang__)
-#define FASTBITCOPY_COMPILER_BARRIER() __asm__ __volatile__("" ::: "memory")
-#elif defined(_MSC_VER)
-#include <intrin.h>
-#define FASTBITCOPY_COMPILER_BARRIER() _ReadWriteBarrier()
-#else
-#define FASTBITCOPY_COMPILER_BARRIER() std::atomic_thread_fence(std::memory_order_seq_cst)
-#endif
+// FASTBITCOPY_COMPILER_BARRIER was an inline-asm "memory" clobber placed
+// between the uint8* leading-byte fixup and the uint64* bulk copy in
+// BitsCopyFastUnaligned. It was added under the hypothesis that GCC/Clang
+// were eliding the uint8* stores because they assumed no aliasing with
+// the subsequent uint64* reads. The actual root causes turned out to be
+// a dangling-reference bug in FMath::Min/Max (PR #6) and alignment UB
+// (PR #7). PRs #9 and #10 removed the other two barriers with CI staying
+// green, confirming the hypothesis was wrong. Removed.
 
 // FASTBITCOPY_NOINLINE was a defensive noinline attribute added to prevent
 // GCC/Clang from inlining the hot functions into callers and then applying
@@ -239,11 +232,6 @@ static void BitsCopyFastUnaligned(uint8 *Dest, int DestBit, uint8 *Src, int SrcB
 		++Src;
 		SrcBit = 0;
 	}
-	// Compiler barrier: GCC/Clang otherwise aggressively elide our uint8*
-	// stores above on the assumption they don't alias the uint64* reads that
-	// follow. This is a pure compile-time fence (no runtime cost) that
-	// forces the compiler to keep them.
-	FASTBITCOPY_COMPILER_BARRIER();
 	CopyBitsSrcAligned((uint64*)Dest, DestBit, (uint64*)Src, BitCount);
 }
 
