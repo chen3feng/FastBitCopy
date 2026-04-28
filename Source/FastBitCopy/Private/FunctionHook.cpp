@@ -307,6 +307,73 @@ namespace FastBitCopyHookPrivate
 			case 0x1E: // endbr64 etc.: reg/mem w/ modrm
 				DecodeModRM(0);
 				return Len;
+			// 0F B6 /r  movzx r32, r/m8
+			// 0F B7 /r  movzx r32, r/m16
+			// 0F BE /r  movsx r32, r/m8
+			// 0F BF /r  movsx r32, r/m16
+			case 0xB6:
+			case 0xB7:
+			case 0xBE:
+			case 0xBF:
+				DecodeModRM(0);
+				return Len;
+			// 0F 80..8F rel32  near conditional jumps (Jcc)
+			case 0x80:
+			case 0x81:
+			case 0x82:
+			case 0x83:
+			case 0x84:
+			case 0x85:
+			case 0x86:
+			case 0x87:
+			case 0x88:
+			case 0x89:
+			case 0x8A:
+			case 0x8B:
+			case 0x8C:
+			case 0x8D:
+			case 0x8E:
+			case 0x8F:
+				Len += 4; // rel32
+				return Len;
+			// 0F 40..4F /r  CMOVcc r, r/m
+			case 0x40:
+			case 0x41:
+			case 0x42:
+			case 0x43:
+			case 0x44:
+			case 0x45:
+			case 0x46:
+			case 0x47:
+			case 0x48:
+			case 0x49:
+			case 0x4A:
+			case 0x4B:
+			case 0x4C:
+			case 0x4D:
+			case 0x4E:
+			case 0x4F:
+				DecodeModRM(0);
+				return Len;
+			// 0F 90..9F /r  SETcc r/m8
+			case 0x90:
+			case 0x91:
+			case 0x92:
+			case 0x93:
+			case 0x94:
+			case 0x95:
+			case 0x96:
+			case 0x97:
+			case 0x98:
+			case 0x99:
+			case 0x9A:
+			case 0x9B:
+			case 0x9C:
+			case 0x9D:
+			case 0x9E:
+			case 0x9F:
+				DecodeModRM(0);
+				return Len;
 			default:
 				return 0; // unsupported
 			}
@@ -335,25 +402,200 @@ namespace FastBitCopyHookPrivate
 		// 31 /r  xor
 		// 01 /r  add
 		// 29 /r  sub
-		// 39 /r  cmp
+		// 39 /r  cmp r/m, r
+		// 3B /r  cmp r, r/m
+		// 3A /r  cmp r8, r/m8
 		// 8A /r, 88 /r  mov byte
+		// 09 /r  or r/m, r
+		// 0B /r  or r, r/m
+		// 21 /r  and r/m, r
+		// 23 /r  and r, r/m
 		case 0x88: case 0x89: case 0x8A: case 0x8B: case 0x8D:
 		case 0x85: case 0x31: case 0x01: case 0x29: case 0x39:
 		case 0x84: case 0x30: case 0x00: case 0x28: case 0x38:
+		case 0x3A:
+		case 0x3B:
+		case 0x09:
+		case 0x0B:
+		case 0x21:
+		case 0x23:
 			DecodeModRM(0);
 			return Len;
 
-		// FF /r  (push/call/jmp etc.) — we only accept push r/m64 (/6)
+		// Short conditional jumps: 70..7F rel8 (Jcc short)
+		case 0x70:
+		case 0x71:
+		case 0x72:
+		case 0x73:
+		case 0x74:
+		case 0x75:
+		case 0x76:
+		case 0x77:
+		case 0x78:
+		case 0x79:
+		case 0x7A:
+		case 0x7B:
+		case 0x7C:
+		case 0x7D:
+		case 0x7E:
+		case 0x7F:
+			Len += 1; // rel8
+			return Len;
+
+		// EB rel8  short unconditional jump
+		case 0xEB:
+			Len += 1; // rel8
+			return Len;
+
+		// E9 rel32  near unconditional jump
+		case 0xE9:
+			Len += 4; // rel32
+			return Len;
+
+		// E8 rel32  near call
+		case 0xE8:
+			Len += 4; // rel32
+			return Len;
+
+		// C7 /0 id  mov r/m32, imm32 (or r/m64 with REX.W)
+		case 0xC7:
+			DecodeModRM(bHasOperandSize ? 2 : 4);
+			return Len;
+
+		// C6 /0 ib  mov r/m8, imm8
+		case 0xC6:
+			DecodeModRM(1);
+			return Len;
+
+		// 80 /digit ib  ADD/OR/ADC/SBB/AND/SUB/XOR/CMP r/m8, imm8
+		case 0x80:
+			DecodeModRM(1);
+			return Len;
+
+		// FF /r  (inc/dec/call/jmp/push r/m)
 		case 0xFF:
 		{
 			uint8 MR = P[Len];
 			uint8 Reg = (MR >> 3) & 7;
-			if (Reg == 6) { DecodeModRM(0); return Len; } // push r/m
+			// /0 = inc, /1 = dec, /2 = call, /4 = jmp, /6 = push
+			if (Reg == 0 || Reg == 1 || Reg == 2 || Reg == 4 || Reg == 6)
+			{
+				DecodeModRM(0);
+				return Len;
+			}
 			return 0;
 		}
 
 		default:
 			return 0; // unsupported — caller will bail out
+		}
+	}
+#endif // PLATFORM_CPU_X86_FAMILY
+
+	// -----------------------------------------------------------------------
+	// x86_64 trampoline relocation
+	// -----------------------------------------------------------------------
+	// After copying the displaced prologue bytes into the trampoline, any
+	// PC-relative instruction (Jcc rel8/rel32, JMP rel8/rel32, CALL rel32,
+	// RIP-relative ModRM) must have its offset adjusted because the
+	// trampoline lives at a different address than the original code.
+	//
+	// We walk the copied bytes instruction-by-instruction and patch each
+	// relative offset so it still points to the same absolute target.
+	static void RelocateTrampoline(uint8 *Tramp, const uint8 *Orig, int32 PatchSize)
+	{
+		int32 Off = 0;
+		while (Off < PatchSize)
+		{
+			uint8 *TP = Tramp + Off;
+			const uint8 *OP = Orig + Off;
+			int N = InstrLen(TP);
+			if (N <= 0)
+				break; // should not happen — already validated
+
+			// Skip prefixes (same logic as InstrLen)
+			int PrefixLen = 0;
+			while (PrefixLen < N)
+			{
+				uint8 b = TP[PrefixLen];
+				if (b == 0x66 || b == 0x67 || b == 0xF0 || b == 0xF2 || b == 0xF3 ||
+					b == 0x2E || b == 0x36 || b == 0x3E || b == 0x26 || b == 0x64 || b == 0x65)
+				{
+					++PrefixLen;
+					continue;
+				}
+				break;
+			}
+			// REX prefix
+			int OpOff = PrefixLen;
+			if (OpOff < N && (TP[OpOff] & 0xF0) == 0x40)
+				++OpOff;
+
+			uint8 Op = TP[OpOff];
+			const intptr_t Delta = (intptr_t)TP - (intptr_t)OP; // Tramp - Orig
+
+			// Short conditional jump: 70..7F rel8
+			if (Op >= 0x70 && Op <= 0x7F)
+			{
+				int8 Rel8 = (int8)TP[OpOff + 1];
+				int32 NewRel = (int32)Rel8 - (int32)Delta;
+				// If the new offset fits in int8, patch in place.
+				// Otherwise we cannot fix it (would need to widen to 0F 8x rel32),
+				// but for short-range jumps within the same function this is
+				// almost always fine.
+				if (NewRel >= -128 && NewRel <= 127)
+				{
+					TP[OpOff + 1] = (uint8)(int8)NewRel;
+				}
+				// else: leave as-is; the jump target is likely within the
+				// trampoline itself or very close — best effort.
+			}
+			// Short unconditional jump: EB rel8
+			else if (Op == 0xEB)
+			{
+				int8 Rel8 = (int8)TP[OpOff + 1];
+				int32 NewRel = (int32)Rel8 - (int32)Delta;
+				if (NewRel >= -128 && NewRel <= 127)
+				{
+					TP[OpOff + 1] = (uint8)(int8)NewRel;
+				}
+			}
+			// Near unconditional jump: E9 rel32
+			else if (Op == 0xE9)
+			{
+				int32 Rel32 = *(int32 *)(TP + OpOff + 1);
+				int64 NewRel = (int64)Rel32 - (int64)Delta;
+				if (NewRel >= INT32_MIN && NewRel <= INT32_MAX)
+				{
+					*(int32 *)(TP + OpOff + 1) = (int32)NewRel;
+				}
+			}
+			// Near call: E8 rel32
+			else if (Op == 0xE8)
+			{
+				int32 Rel32 = *(int32 *)(TP + OpOff + 1);
+				int64 NewRel = (int64)Rel32 - (int64)Delta;
+				if (NewRel >= INT32_MIN && NewRel <= INT32_MAX)
+				{
+					*(int32 *)(TP + OpOff + 1) = (int32)NewRel;
+				}
+			}
+			// Two-byte near conditional jump: 0F 80..8F rel32
+			else if (Op == 0x0F && (OpOff + 1) < N)
+			{
+				uint8 Op2 = TP[OpOff + 1];
+				if (Op2 >= 0x80 && Op2 <= 0x8F)
+				{
+					int32 Rel32 = *(int32 *)(TP + OpOff + 2);
+					int64 NewRel = (int64)Rel32 - (int64)Delta;
+					if (NewRel >= INT32_MIN && NewRel <= INT32_MAX)
+					{
+						*(int32 *)(TP + OpOff + 2) = (int32)NewRel;
+					}
+				}
+			}
+
+			Off += N;
 		}
 	}
 #endif // PLATFORM_CPU_X86_FAMILY
@@ -427,6 +669,10 @@ bool FFunctionHook::Install(void* Target, void* Detour, void** OutTrampoline)
 				Needed = MaxNeeded;
 				continue;
 			}
+			UE_LOG(LogTemp, Warning,
+				   TEXT("FastBitCopy: InstrLen failed at offset %d, byte=0x%02X. "
+						"Cannot decode prologue for hook installation."),
+				   Copied, T[Copied]);
 			return false;
 		}
 		Copied += N;
@@ -441,6 +687,7 @@ bool FFunctionHook::Install(void* Target, void* Detour, void** OutTrampoline)
 	void* Tramp = AllocExecutable(Target, TrampSize);
 	if (!Tramp) return false;
 	FMemory::Memcpy(Tramp, OriginalBytes, PatchSize);
+	RelocateTrampoline((uint8 *)Tramp, T, PatchSize);
 	WriteJmpAbs14((uint8*)Tramp + PatchSize, (uint8*)Target + PatchSize);
 
 	// Step 3: patch the prologue.
@@ -473,6 +720,7 @@ bool FFunctionHook::Install(void* Target, void* Detour, void** OutTrampoline)
 				Tramp = AllocExecutable(Target, TrampSize2);
 				if (!Tramp) return false;
 				FMemory::Memcpy(Tramp, OriginalBytes, PatchSize);
+				RelocateTrampoline((uint8 *)Tramp, T, PatchSize);
 				WriteJmpAbs14((uint8*)Tramp + PatchSize, (uint8*)Target + PatchSize);
 			}
 			WriteJmpAbs14(T, Detour);

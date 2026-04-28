@@ -1,12 +1,12 @@
 // Copyright (c) chen3feng. All Rights Reserved.
 //
-// Standalone CI test: compares appBitsCpyFastImpl (the optimized version)
-// against OriginalAppBitsCpyForTest (the stock UE reference), on thousands
+// Standalone CI test: compares FastBitCopy (the optimized version)
+// against OriginalAppBitsCpy (the stock UE reference), on thousands
 // of random (DestBit, SrcBit, BitCount) combinations, and prints a mini
 // micro-benchmark. No Unreal Engine required.
 
 #include "ue_shim.h"
-#include "BitCopyFast.h"
+#include "FastBitCopy.h"
 
 #include <chrono>
 #include <cstdio>
@@ -93,8 +93,8 @@ namespace
         {
             std::memset(B.DstFast.data(), 0xA5, B.DstFast.size());
             std::memset(B.DstRef.data(), 0xA5, B.DstRef.size());
-            appBitsCpyFastImpl(B.DstFast.data(), C.DestBit, B.Src.data(), C.SrcBit, C.BitCount);
-            OriginalAppBitsCpyForTest(B.DstRef.data(), C.DestBit, B.Src.data(), C.SrcBit, C.BitCount);
+            FastBitCopy(B.DstFast.data(), C.DestBit, B.Src.data(), C.SrcBit, C.BitCount);
+            OriginalAppBitsCpy(B.DstRef.data(), C.DestBit, B.Src.data(), C.SrcBit, C.BitCount);
             if (!BitsEqual(B.DstFast.data(), B.DstRef.data(), C.DestBit, C.BitCount))
             {
                 ++failures;
@@ -141,8 +141,8 @@ namespace
             std::uniform_int_distribution<int> CountDist(0, MaxCount);
             int BitCount = CountDist(Rng);
 
-            appBitsCpyFastImpl(B.DstFast.data(), DestBit, B.Src.data(), SrcBit, BitCount);
-            OriginalAppBitsCpyForTest(B.DstRef.data(), DestBit, B.Src.data(), SrcBit, BitCount);
+            FastBitCopy(B.DstFast.data(), DestBit, B.Src.data(), SrcBit, BitCount);
+            OriginalAppBitsCpy(B.DstRef.data(), DestBit, B.Src.data(), SrcBit, BitCount);
 
             // Target bits must match.
             if (!BitsEqual(B.DstFast.data(), B.DstRef.data(), DestBit, BitCount))
@@ -205,17 +205,17 @@ void RunBench(std::mt19937& Rng)
     };
 
     std::printf("[bench] aligned (SrcBit=DestBit=3), %d bits/call, %d iters\n", kCopyBits, kIters);
-    Bench("Original appBitsCpy",   &OriginalAppBitsCpyForTest, 3, 3);
-    Bench("appBitsCpyFastImpl",    &appBitsCpyFastImpl,        3, 3);
+    Bench("Original appBitsCpy", &OriginalAppBitsCpy, 3, 3);
+    Bench("FastBitCopy", &FastBitCopy, 3, 3);
 
     std::printf("[bench] unaligned (SrcBit=1 DestBit=5), %d bits/call, %d iters\n", kCopyBits, kIters);
-    Bench("Original appBitsCpy",   &OriginalAppBitsCpyForTest, 5, 1);
-    Bench("appBitsCpyFastImpl",    &appBitsCpyFastImpl,        5, 1);
+    Bench("Original appBitsCpy", &OriginalAppBitsCpy, 5, 1);
+    Bench("FastBitCopy", &FastBitCopy, 5, 1);
 }
 
 } // namespace
 
-// Forward declaration for the probe defined in BitCopyFast.cpp.
+// Forward declaration for the probe defined in FastBitCopy.cpp.
 int FastBitCopy_IsOptimizedBuild();
 
 int main()
@@ -237,14 +237,14 @@ int main()
         uint8 tmp[16] = {0};
         uint8 src[16];
         std::memset(src, 0xFF, sizeof(src));
-        appBitsCpyFastImpl(tmp, 0, src, 0, 8);
+        FastBitCopy(tmp, 0, src, 0, 8);
         std::printf("[info] smoke(aligned): tmp[0]=0x%02X (expect 0xFF)\n", tmp[0]);
     }
     {
         uint8 tmp[16] = {0};
         uint8 src[16];
         std::memset(src, 0xFF, sizeof(src));
-        appBitsCpyFastImpl(tmp, 5, src, 3, 64);
+        FastBitCopy(tmp, 5, src, 3, 64);
         std::printf("[info] smoke(unaligned 5/3 64b): tmp[0..4]=%02X %02X %02X %02X %02X\n",
                     tmp[0], tmp[1], tmp[2], tmp[3], tmp[4]);
     }
@@ -258,14 +258,14 @@ int main()
         const uint8 src_bytes[] = {0x92, 0x8C, 0xD0, 0x24, 0xED, 0xA6, 0x00, 0x00, 0};
         uint8 src[32];
         std::memcpy(src, src_bytes, sizeof(src_bytes));
-        appBitsCpyFastImpl(tmp, 5, src, 3, 64);
+        FastBitCopy(tmp, 5, src, 3, 64);
         std::printf("[info] smoke(sentinel 0xA5, real src): tmp[0..4]=%02X %02X %02X %02X %02X (expect 45 32 42 93 ..)\n",
                     tmp[0], tmp[1], tmp[2], tmp[3], tmp[4]);
     }
 
     // Heap-based repro of the same unaligned smoke. If this reproduces the
     // Linux -O2 "nothing was written" behaviour seen on the stack version,
-    // the bug is truly inside appBitsCpyFastImpl. If it does NOT reproduce,
+    // the bug is truly inside FastBitCopy. If it does NOT reproduce,
     // the bug is specifically a stack-escape / no-address-taken analysis
     // issue that only affects short-lived local arrays.
     {
@@ -274,7 +274,7 @@ int main()
         auto *src = new uint8[32];
         const uint8 src_bytes[] = {0x92, 0x8C, 0xD0, 0x24, 0xED, 0xA6, 0x00, 0x00, 0};
         std::memcpy(src, src_bytes, sizeof(src_bytes));
-        appBitsCpyFastImpl(tmp, 5, src, 3, 64);
+        FastBitCopy(tmp, 5, src, 3, 64);
         // Also dump via volatile reads to prevent any post-call DCE.
         volatile uint8 v0 = tmp[0], v1 = tmp[1], v2 = tmp[2], v3 = tmp[3], v4 = tmp[4];
         std::printf("[info] smoke(HEAP sentinel): tmp[0..4]=%02X %02X %02X %02X %02X (expect 45 32 42 93 ..)\n",

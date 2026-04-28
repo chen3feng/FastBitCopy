@@ -9,8 +9,8 @@
 //   * Speed benchmark: compares Original vs Fast across various sizes.
 
 #include "CoreMinimal.h"
-#include "BitCopyFast.h"
 #include "FastBitCopy.h"
+#include "FastBitCopyModule.h"
 
 #include "Misc/AutomationTest.h"
 #include "Misc/MemStack.h"
@@ -67,8 +67,8 @@ bool FFastBitCopyCorrectness::RunTest(const FString& Parameters)
 		uint8 DstFast[TestBytes] = { 0 };
 		uint8 DstRef [TestBytes] = { 0 };
 
-		appBitsCpyFastImpl      (DstFast, DstBit, Src, SrcBit, BitCount);
-		OriginalAppBitsCpyForTest(DstRef , DstBit, Src, SrcBit, BitCount);
+		FastBitCopy(DstFast, DstBit, Src, SrcBit, BitCount);
+		OriginalAppBitsCpy(DstRef, DstBit, Src, SrcBit, BitCount);
 
 		if (FMemory::Memcmp(DstFast, DstRef, TestBytes) != 0)
 		{
@@ -104,7 +104,7 @@ bool FFastBitCopyHookSanity::RunTest(const FString& Parameters)
 	const int DstBit = 17, SrcBit = 5, BitCount = TestBytes*8 - 100;
 
 	appBitsCpy         (A, DstBit, Src, SrcBit, BitCount); // hooked
-	appBitsCpyFastImpl (B, DstBit, Src, SrcBit, BitCount); // direct
+	FastBitCopy(B, DstBit, Src, SrcBit, BitCount);		   // direct
 
 	UTEST_EQUAL("Hooked appBitsCpy matches fast impl",
 		FMemory::Memcmp(A, B, TestBytes), 0);
@@ -124,8 +124,8 @@ bool FFastBitCopyPageBound::RunTest(const FString& Parameters)
 	uint8* Dst = (uint8*)FPageAllocator::Get().Alloc();
 	FMemory::Memset(Src, 0xFF, PageSize);
 
-	appBitsCpyFastImpl(Dst, 9,     Src, 10,  PageSize * 8 - 10);
-	appBitsCpyFastImpl(Dst, 23890, Src, 464, 8839);
+	FastBitCopy(Dst, 9, Src, 10, PageSize * 8 - 10);
+	FastBitCopy(Dst, 23890, Src, 464, 8839);
 
 	const int TestBits = PageSize * 8;
 	for (int i = 0; i < 10000; ++i)
@@ -133,7 +133,7 @@ bool FFastBitCopyPageBound::RunTest(const FString& Parameters)
 		int DstBit   = rand() % TestBits;
 		int SrcBit   = rand() % (TestBits - DstBit);
 		int BitCount = rand() % (TestBits - FMath::Max(DstBit, SrcBit));
-		appBitsCpyFastImpl(Dst, DstBit, Src, SrcBit, BitCount);
+		FastBitCopy(Dst, DstBit, Src, SrcBit, BitCount);
 	}
 
 	FPageAllocator::Get().Free(Src);
@@ -166,8 +166,10 @@ static double BenchOne(int LoopCount)
 	{
 		if constexpr (Type == Original)
 		{
-			if (IsAligned) OriginalAppBitsCpyForTest(Dest, 0, Src, 0, Bits);
-			else           OriginalAppBitsCpyForTest(Dest, 0, Src, 1, Bits - 1);
+			if (IsAligned)
+				OriginalAppBitsCpy(Dest, 0, Src, 0, Bits);
+			else
+				OriginalAppBitsCpy(Dest, 0, Src, 1, Bits - 1);
 		}
 		else if constexpr (Type == Hooked)
 		{
@@ -176,8 +178,10 @@ static double BenchOne(int LoopCount)
 		}
 		else
 		{
-			if (IsAligned) appBitsCpyFastImpl(Dest, 0, Src, 0, Bits);
-			else           appBitsCpyFastImpl(Dest, 0, Src, 1, Bits - 1);
+			if (IsAligned)
+				FastBitCopy(Dest, 0, Src, 0, Bits);
+			else
+				FastBitCopy(Dest, 0, Src, 1, Bits - 1);
 		}
 	}
 	const double Elapsed = FPlatformTime::Seconds() - StartTime;
@@ -193,6 +197,8 @@ struct FBenchResult
 	double OriginalUnaligned;
 	double FastAligned;
 	double FastUnaligned;
+	double HookedAligned;
+	double HookedUnaligned;
 };
 
 template <int BytesSize>
@@ -206,8 +212,8 @@ static FBenchResult BenchSize()
 	R.OriginalUnaligned = BenchOne<BytesSize, Original, Unaligned>(LoopCount);
 	R.FastAligned = BenchOne<BytesSize, Fast, Aligned>(LoopCount);
 	R.FastUnaligned = BenchOne<BytesSize, Fast, Unaligned>(LoopCount);
-	BenchOne<BytesSize, Hooked  , Aligned  >(LoopCount);
-	BenchOne<BytesSize, Hooked  , Unaligned>(LoopCount);
+	R.HookedAligned = BenchOne<BytesSize, Hooked, Aligned>(LoopCount);
+	R.HookedUnaligned = BenchOne<BytesSize, Hooked, Unaligned>(LoopCount);
 	return R;
 }
 
@@ -230,21 +236,27 @@ bool FFastBitCopySpeed::RunTest(const FString& Parameters)
 	// (In practice Fast is typically 2-10x faster for large sizes.)
 	auto Check = [this](int Size, const FBenchResult &R)
 	{
-		// Only check unaligned — that's where the algorithmic improvement is.
-		if (R.FastUnaligned > R.OriginalUnaligned * 1.05)
+		// Check the hooked path (what callers actually experience) against
+		// the original. If the hook is installed, Hooked should be as fast
+		// as Fast; if not, it falls back to Original speed.
+		if (R.HookedUnaligned > R.OriginalUnaligned * 1.05)
 		{
 			AddWarning(FString::Printf(
 				TEXT("Optimization regression at %d bytes unaligned: "
-					 "Fast=%.4fs > Original=%.4fs (ratio=%.2fx)"),
-				Size, R.FastUnaligned, R.OriginalUnaligned,
-				R.FastUnaligned / R.OriginalUnaligned));
+					 "Hooked=%.4fs > Original=%.4fs (ratio=%.2fx)"),
+				Size, R.HookedUnaligned, R.OriginalUnaligned,
+				R.HookedUnaligned / R.OriginalUnaligned));
 		}
 		else
 		{
 			UE_LOG(LogFastBitCopyTests, Display,
-				   TEXT("  >> %d bytes unaligned speedup: %.2fx"),
-				   Size, R.OriginalUnaligned / FMath::Max(R.FastUnaligned, 1e-9));
+				   TEXT("  >> %d bytes unaligned hooked speedup: %.2fx"),
+				   Size, R.OriginalUnaligned / FMath::Max(R.HookedUnaligned, 1e-9));
 		}
+		// Also log the direct fast-path speedup for reference.
+		UE_LOG(LogFastBitCopyTests, Display,
+			   TEXT("  >> %d bytes unaligned fast speedup:   %.2fx"),
+			   Size, R.OriginalUnaligned / FMath::Max(R.FastUnaligned, 1e-9));
 	};
 
 	Check(64, BenchSize<64>());

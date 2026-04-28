@@ -2,7 +2,7 @@
 
 This directory is **not** part of the Unreal Engine plugin. It exists only so
 that GitHub Actions can, on every push/PR, quickly validate that
-`BitCopyFast.cpp` still:
+`FastBitCopy.cpp` still:
 
 1. Produces bit-for-bit identical output to the original `appBitsCpy`, across
    20 000 random `(DestBit, SrcBit, BitCount)` combinations.
@@ -33,10 +33,10 @@ Typical output:
 [ OK ] correctness: 20000 random trials passed
 [bench] aligned (SrcBit=DestBit=3), 8192 bits/call, 20000 iters
   Original appBitsCpy           xxxx.x ns/op
-  appBitsCpyFastImpl              yy.y ns/op
+  FastBitCopy              yy.y ns/op
 [bench] unaligned (SrcBit=1 DestBit=5), 8192 bits/call, 20000 iters
   Original appBitsCpy           xxxx.x ns/op
-  appBitsCpyFastImpl             yyy.y ns/op
+  FastBitCopy             yyy.y ns/op
 ```
 
 ## Why not compile the real plugin in CI?

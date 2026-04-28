@@ -19,7 +19,7 @@
 //   must use FASTBITCOPY_API, not CORE_API. CORE_API resolves to dllimport
 //   in non-Core modules, causing C2491 on MSVC if used on a definition.
 
-#include "BitCopyFast.h"
+#include "FastBitCopy.h"
 #include "CoreMinimal.h"
 #include "Math/UnrealMathUtility.h"
 #include <cstring>
@@ -231,9 +231,9 @@ static void BitsCopyFastUnaligned(uint8 *Dest, int DestBit, uint8 *Src, int SrcB
 // Original appBitsCpy (kept verbatim for benchmarking & as a fallback reference)
 // ----------------------------------------------------------------------------
 // The original appBitsCpy reference implementation. FORCEINLINE on all
-// platforms: it is only called from OriginalAppBitsCpyForTest (benchmark
+// platforms: it is only called from OriginalAppBitsCpy (benchmark
 // harness) and the compiler can decide whether to actually inline it.
-static FORCEINLINE void OriginalAppBitsCpy(uint8 *Dest, int32 DestBit, uint8 *Src, int32 SrcBit, int32 BitCount)
+static FORCEINLINE void OriginalAppBitsCpyImpl(uint8 *Dest, int32 DestBit, uint8 *Src, int32 SrcBit, int32 BitCount)
 {
 	if (BitCount <= 8)
 	{
@@ -319,13 +319,13 @@ static FORCEINLINE void OriginalAppBitsCpy(uint8 *Dest, int32 DestBit, uint8 *Sr
 	}
 }
 
-void OriginalAppBitsCpyForTest(uint8* Dest, int32 DestBit, uint8* Src, int32 SrcBit, int32 BitCount)
+void OriginalAppBitsCpy(uint8 *Dest, int32 DestBit, uint8 *Src, int32 SrcBit, int32 BitCount)
 {
-	OriginalAppBitsCpy(Dest, DestBit, Src, SrcBit, BitCount);
+	OriginalAppBitsCpyImpl(Dest, DestBit, Src, SrcBit, BitCount);
 }
 
 // Our optimized bit copy entry point.
-void appBitsCpyFastImpl(uint8 *Dest, int32 DestBit, uint8 *Src, int32 SrcBit, int32 BitCount)
+void FastBitCopy(uint8 *Dest, int32 DestBit, uint8 *Src, int32 SrcBit, int32 BitCount)
 {
 	// Align to byte bound.
 	Dest += DestBit / 8;
@@ -350,12 +350,12 @@ int FastBitCopy_IsOptimizedBuild() { return 1; }
 // Fallback: just forward to UE's implementation by declaring it and calling through.
 CORE_API void appBitsCpy(uint8* Dest, int32 DestBit, uint8* Src, int32 SrcBit, int32 BitCount);
 
-void appBitsCpyFastImpl(uint8* Dest, int32 DestBit, uint8* Src, int32 SrcBit, int32 BitCount)
+void FastBitCopy(uint8 *Dest, int32 DestBit, uint8 *Src, int32 SrcBit, int32 BitCount)
 {
 	appBitsCpy(Dest, DestBit, Src, SrcBit, BitCount);
 }
 
-void OriginalAppBitsCpyForTest(uint8* Dest, int32 DestBit, uint8* Src, int32 SrcBit, int32 BitCount)
+void OriginalAppBitsCpy(uint8 *Dest, int32 DestBit, uint8 *Src, int32 SrcBit, int32 BitCount)
 {
 	appBitsCpy(Dest, DestBit, Src, SrcBit, BitCount);
 }

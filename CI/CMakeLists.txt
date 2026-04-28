@@ -17,7 +17,7 @@ set(PLUGIN_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
 add_executable(fastbitcopy_ci
     test_main.cpp
-    "${PLUGIN_ROOT}/Source/FastBitCopy/Private/BitCopyFast.cpp"
+    "${PLUGIN_ROOT}/Source/FastBitCopy/Private/FastBitCopy.cpp"
 )
 
 target_include_directories(fastbitcopy_ci PRIVATE
@@ -32,7 +32,7 @@ if(MSVC)
     target_compile_options(fastbitcopy_ci PRIVATE /FI"ue_shim.h" /W4 /permissive-)
 else()
     # -fno-strict-aliasing matches what UBT passes to GCC/Clang; without it,
-    # BitCopyFast.cpp's uint8*/uint64* aliasing is UB and gets DCE'd on -O2.
+    # FastBitCopy.cpp's uint8*/uint64* aliasing is UB and gets DCE'd on -O2.
     target_compile_options(fastbitcopy_ci PRIVATE -include ue_shim.h -Wall -Wextra -fno-strict-aliasing)
 endif()
 

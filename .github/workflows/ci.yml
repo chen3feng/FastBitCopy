@@ -120,23 +120,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Compile BitCopyFast.cpp to assembly
+      - name: Compile FastBitCopy.cpp to assembly
         run: |
           mkdir -p asm-out
           g++ -S -O2 -fno-strict-aliasing -std=c++17 \
             -ICI -ICI/compat -ISource/FastBitCopy/Public \
             -include CI/ue_shim.h \
-            Source/FastBitCopy/Private/BitCopyFast.cpp \
-            -o asm-out/BitCopyFast.s
+            Source/FastBitCopy/Private/FastBitCopy.cpp \
+            -o asm-out/FastBitCopy.s
           echo "--- first 200 lines of BitsCopyFastUnaligned region ---"
-          grep -n 'BitsCopyFastUnaligned\|appBitsCpyFastImpl\|CopyBitsSrcAligned' asm-out/BitCopyFast.s | head -n 40 || true
+          grep -n 'BitsCopyFastUnaligned\|FastBitCopy\|CopyBitsSrcAligned' asm-out/FastBitCopy.s | head -n 40 || true
           echo "--- total line count ---"
-          wc -l asm-out/BitCopyFast.s
+          wc -l asm-out/FastBitCopy.s
       - name: Upload assembly artifact
         uses: actions/upload-artifact@v4
         with:
-          name: BitCopyFast-linux-O2-asm
-          path: asm-out/BitCopyFast.s
+          name: FastBitCopy-linux-O2-asm
+          path: asm-out/FastBitCopy.s
 
   # ---------------------------------------------------------------------------
   # 3) Cross-compile for Android arm64 using the NDK toolchain and run the

@@ -1,8 +1,11 @@
 # FastBitCopy — UE 插件
 
 [![CI](https://github.com/chen3feng/FastBitCopy/actions/workflows/ci.yml/badge.svg)](https://github.com/chen3feng/FastBitCopy/actions/workflows/ci.yml)
+[![UE Plugin](https://img.shields.io/badge/Unreal%20Engine-Plugin-blue?logo=unrealengine&logoColor=white)](https://www.unrealengine.com/marketplace)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 [English](README.md) | [中文](README_CN.md)
+
 **FastBitCopy** 通过一套跨平台的运行时函数 Hook，将 UE 中的
 `appBitsCpy`（被 `FBitReader` / `FBitWriter`、网络同步、序列化等大量调用）
 替换为高度优化的实现。**无需修改引擎源码，放进 `Plugins/` 即生效**。
@@ -12,7 +15,7 @@
 UE 自带的 `appBitsCpy` 是逐字节处理的标量实现。在 x86-64 与 arm64 上我们
 可以用 `memcpy` + 非对齐 64-bit 读写做到显著更快：
 
-| 拷贝类型 | 原始 `appBitsCpy` | `appBitsCpyFastImpl` | 加速比 |
+| 拷贝类型 | 原始 `appBitsCpy` | `FastBitCopy` | 加速比 |
 |---------|------------------:|---------------------:|-------:|
 | 对齐    |  1743817 ns（1MiB）|              60595 ns | 约 30× |
 | 非对齐  |  1776341 ns（1MiB）|             325179 ns |  约 5× |
@@ -169,11 +172,11 @@ FastBitCopy/
 │   ├── FastBitCopy/              # 运行时模块（安装 Hook）
 │   │   ├── FastBitCopy.Build.cs
 │   │   ├── Public/
-│   │   │   ├── FastBitCopy.h
-│   │   │   └── BitCopyFast.h
+│   │   │   ├── FastBitCopyModule.h
+│   │   │   └── FastBitCopy.h
 │   │   └── Private/
 │   │       ├── FastBitCopyModule.cpp
-│   │       ├── BitCopyFast.cpp
+│   │       ├── FastBitCopy.cpp
 │   │       ├── FunctionHook.h
 │   │       └── FunctionHook.cpp
 │   └── FastBitCopyTests/         # 开发工具类测试模块
@@ -203,7 +206,7 @@ FastBitCopy/
 
 | 测试用例                   | 作用                                              |
 |----------------------------|---------------------------------------------------|
-| `FastBitCopy.HookSanity`   | 断言 Hook 已安装，且导出的 `appBitsCpy` 与 `appBitsCpyFastImpl` 的输出字节完全一致。 |
+| `FastBitCopy.HookSanity`   | 断言 Hook 已安装，且导出的 `appBitsCpy` 与 `FastBitCopy` 的输出字节完全一致。 |
 | `FastBitCopy.Correctness`  | 在 10 000 组随机 `(SrcBit, DstBit, BitCount)` 上对比 Fast 实现与原始实现。 |
 | `FastBitCopy.PageBound`    | 覆盖真实 OS 页边界，验证非对齐 64-bit 读不会越界。 |
 | `FastBitCopy.Speed`        | 对 1B – 1KiB 各尺寸分别做 Original / Hooked / Fast 三者的基准测试。 |
@@ -219,17 +222,17 @@ UnrealEditor-Cmd.exe <你的项目.uproject> -ExecCmds="Automation RunTests Fast
 即便在不经过 `appBitsCpy` 的代码路径里，也可以直接调用优化后的实现：
 
 ```cpp
-#include "BitCopyFast.h"
+#include "FastBitCopy.h"
 
-void appBitsCpyFastImpl(uint8* Dest, int32 DestBit,
-                        uint8* Src,  int32 SrcBit,
-                        int32 BitCount);
+void FastBitCopy(uint8* Dest, int32 DestBit,
+                uint8* Src,  int32 SrcBit,
+                int32 BitCount);
 ```
 
 查询 Hook 状态：
 
 ```cpp
-#include "FastBitCopy.h"
+#include "FastBitCopyModule.h"
 
 if (FFastBitCopyModule::IsHookInstalled()) { /* ... */ }
 ```
@@ -241,7 +244,7 @@ if (FFastBitCopyModule::IsHookInstalled()) { /* ... */ }
   `B` / `ADRP` 等；对 `appBitsCpy` 这种叶子函数几乎不可能发生），
   Hook 会**拒绝安装**并记录一条 Warning，引擎回退到自带实现——
   游戏仍然可以正常运行，只是拿不到性能收益。
-* 常规调用走的是 `appBitsCpy -> (jmp) -> appBitsCpyFastImpl`，额外开销
+* 常规调用走的是 `appBitsCpy -> (jmp) -> FastBitCopy`，额外开销
   只有一条 `jmp` 指令，对性能几乎无影响。
 
 ## 许可证
