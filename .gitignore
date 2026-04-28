@@ -29,5 +29,8 @@ Thumbs.db
 # Local environment overrides
 .env
 
+# TestHost UE-generated config (DefaultEngine.ini, DefaultInput.ini, etc.)
+TestHost/Config/
+
 # TestHost plugin root junction/symlink (created by build scripts)
 TestHost/.plugin_root/

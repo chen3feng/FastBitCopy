@@ -37,7 +37,13 @@ namespace
 
 void FFastBitCopyModule::StartupModule()
 {
-#if PLATFORM_LITTLE_ENDIAN
+#if !PLATFORM_LITTLE_ENDIAN
+	UE_LOG(LogFastBitCopy, Log, TEXT("FastBitCopy: big-endian platform, skipping hook."));
+#elif !FASTBITCOPY_PLATFORM_SUPPORTS_HOOK
+	// iOS/tvOS: kernel enforces W^X + code-signing on all executable pages.
+	// Runtime inline-hook patching is impossible; skip without attempting.
+	UE_LOG(LogFastBitCopy, Log, TEXT("FastBitCopy: platform does not support runtime code patching (iOS/tvOS), skipping hook."));
+#else
 	if (FastBitCopy_IsOptimizedBuild() == 0)
 	{
 		// BitCopyFast.cpp compiled the fallback path (appBitsCpyFastImpl
@@ -67,8 +73,6 @@ void FFastBitCopyModule::StartupModule()
 	{
 		UE_LOG(LogFastBitCopy, Warning, TEXT("Failed to install runtime hook for appBitsCpy. Falling back to UE's implementation."));
 	}
-#else
-	UE_LOG(LogFastBitCopy, Log, TEXT("FastBitCopy: unsupported platform, skipping hook."));
 #endif
 }
 
