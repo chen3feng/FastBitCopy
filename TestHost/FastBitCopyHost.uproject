@@ -14,6 +14,6 @@
 		{ "Name": "FastBitCopy", "Enabled": true }
 	],
 	"AdditionalPluginDirectories": [
-		".."
+		".plugin_root"
 	]
 }

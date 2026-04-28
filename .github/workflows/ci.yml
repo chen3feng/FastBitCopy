@@ -139,30 +139,43 @@ jobs:
           path: asm-out/BitCopyFast.s
 
   # ---------------------------------------------------------------------------
-  # 3) Cross-compile the core algorithm for arm64 on Linux, to make sure
-  #    BitCopyFast.cpp still compiles cleanly for the ARM target supported
-  #    by the plugin. We only build (can't execute without qemu), which
-  #    is still a useful signal.
+  # 3) Cross-compile for Android arm64 using the NDK toolchain and run the
+  #    test binary via QEMU user-mode emulation. This validates both NDK
+  #    compatibility and algorithm correctness on arm64.
   # ---------------------------------------------------------------------------
-  arm64-crossbuild:
-    name: arm64 cross-build (linux)
+  android-ndk-test:
+    name: Android NDK arm64 (build + QEMU run)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install aarch64 toolchain
+      - name: Install QEMU user-mode and aarch64 libs
         run: |
           sudo apt-get update
-          sudo apt-get install -y g++-aarch64-linux-gnu
+          sudo apt-get install -y qemu-user qemu-user-binfmt libc6-arm64-cross
 
-      - name: Configure
+      - name: Set up Android NDK
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r26d
+
+      - name: Configure with NDK toolchain
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: |
-          cmake -S CI -B CI/build-arm64 \
+          cmake -S CI -B CI/build-android \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-24 \
+            -DANDROID_STL=c++_static \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_SYSTEM_NAME=Linux \
-            -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
-            -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
-            -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++
+            -DCMAKE_EXE_LINKER_FLAGS="-static"
 
       - name: Build
-        run: cmake --build CI/build-arm64 --config Release -j
+        run: cmake --build CI/build-android --config Release -j
+
+      - name: Run via QEMU
+        run: |
+          # Statically linked; QEMU can run it without Android's linker64.
+          qemu-aarch64 CI/build-android/fastbitcopy_ci

@@ -3,37 +3,28 @@
 // Optimized bit-copy routine used as a drop-in replacement for UE's appBitsCpy.
 // On aligned copies this is ~30x faster than the stock implementation,
 // on unaligned copies ~5x faster. See README for benchmarks.
+//
+// Maintenance notes (for future contributors):
+//
+// - The CI shim's FMath::Min/Max must return by value, not by reference.
+//   Returning by reference (e.g. via decltype(a<b?a:b)) causes dangling
+//   references and ASan stack-use-after-return at -O2. See PR #6.
+//
+// - All uint64* accesses in CopyBitsSrcAligned go through memcpy-based
+//   LoadWordUnaligned/StoreWordUnaligned helpers to avoid alignment UB.
+//   UBSan with -fsanitize=alignment will flag raw uint64* dereferences
+//   on pointers that are only byte-aligned. See PR #7.
+//
+// - In UE Modular (DLL) builds, functions exported across module boundaries
+//   must use FASTBITCOPY_API, not CORE_API. CORE_API resolves to dllimport
+//   in non-Core modules, causing C2491 on MSVC if used on a definition.
 
 #include "BitCopyFast.h"
 #include "CoreMinimal.h"
 #include "Math/UnrealMathUtility.h"
 #include <cstring>
 
-// FASTBITCOPY_COMPILER_BARRIER was an inline-asm "memory" clobber placed
-// between the uint8* leading-byte fixup and the uint64* bulk copy in
-// BitsCopyFastUnaligned. It was added under the hypothesis that GCC/Clang
-// were eliding the uint8* stores because they assumed no aliasing with
-// the subsequent uint64* reads. The actual root causes turned out to be
-// a dangling-reference bug in FMath::Min/Max (PR #6) and alignment UB
-// (PR #7). PRs #9 and #10 removed the other two barriers with CI staying
-// green, confirming the hypothesis was wrong. Removed.
-
-// FASTBITCOPY_NOINLINE was a defensive noinline attribute added to prevent
-// GCC/Clang from inlining the hot functions into callers and then applying
-// aggressive interprocedural dead-store elimination. The root causes of
-// the observed -O2 divergence turned out to be a dangling-reference bug
-// in FMath::Min/Max (PR #6) and alignment UB (PR #7), not an inlining
-// issue. Removed: the compiler is now free to inline as it sees fit.
-
-// FASTBITCOPY_SAFE_OPT was a per-function optimization override that
-// compiled the hot helpers at -O0 on GCC/Clang to work around a
-// miscompilation observed in issue #2. The root cause turned out to be
-// a dangling-reference bug in the CI shim's FMath::Min/Max (fixed in
-// PR #6) and an alignment-UB in CopyBitsSrcAligned (fixed in PR #7),
-// not a compiler bug. Removed: all functions now compile at the
-// project-level optimization (-O2 in Release).
-
-#if PLATFORM_LITTLE_ENDIAN && PLATFORM_SUPPORTS_UNALIGNED_LOADS
+#if PLATFORM_LITTLE_ENDIAN
 
 // Copy bits when BitOffset of Src and Dest are same.
 static void BitsCopyFastAligned(uint8 *Dest, uint8 *Src, int BitOffset, int BitCount)
@@ -76,10 +67,11 @@ static void BitsCopyFastAligned(uint8 *Dest, uint8 *Src, int BitOffset, int BitC
 // memcpy of a trivially-copyable scalar to a single machine load/store
 // at -O1 and above, so this is both language-legal (no strict-aliasing
 // or alignment UB) *and* generates the same single `mov` we want on
-// x86/x64 and arm64. On platforms with hardware-misaligned-load support
-// (PLATFORM_SUPPORTS_UNALIGNED_LOADS) the runtime cost is identical to
-// a raw `*p` dereference; the difference is strictly in what the C++
-// standard and UBSan consider well-defined.
+// x86/x64 and arm64. The runtime cost is identical to a raw `*p`
+// dereference on platforms with hardware unaligned-load support; on
+// others the compiler emits a short byte-by-byte sequence. The
+// difference is strictly in what the C++ standard and UBSan consider
+// well-defined.
 //
 // Rationale for not just reverting to `Dest[i] = Src[i]`: `CopyBitsSrcAligned`
 // is called from `BitsCopyFastUnaligned` after a leading-byte alignment pass
@@ -351,9 +343,9 @@ void appBitsCpyFastImpl(uint8 *Dest, int32 DestBit, uint8 *Src, int32 SrcBit, in
 
 // Build-path self-identification probe (used by the CI harness to confirm
 // we're on the optimized path, not the fallback).
-CORE_API int FastBitCopy_IsOptimizedBuild() { return 1; }
+int FastBitCopy_IsOptimizedBuild() { return 1; }
 
-#else // !PLATFORM_LITTLE_ENDIAN || !PLATFORM_SUPPORTS_UNALIGNED_LOADS
+#else // !PLATFORM_LITTLE_ENDIAN
 
 // Fallback: just forward to UE's implementation by declaring it and calling through.
 CORE_API void appBitsCpy(uint8* Dest, int32 DestBit, uint8* Src, int32 SrcBit, int32 BitCount);
@@ -368,6 +360,6 @@ void OriginalAppBitsCpyForTest(uint8* Dest, int32 DestBit, uint8* Src, int32 Src
 	appBitsCpy(Dest, DestBit, Src, SrcBit, BitCount);
 }
 
-CORE_API int FastBitCopy_IsOptimizedBuild() { return 0; }
+int FastBitCopy_IsOptimizedBuild() { return 0; }
 
 #endif

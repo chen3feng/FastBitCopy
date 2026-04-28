@@ -46,35 +46,38 @@ x86-64 and arm64 we can do much better with aligned 64-bit loads/stores plus
 
 ## Supported platforms
 
-|            | Windows | Linux | macOS |
-|------------|:-------:|:-----:|:-----:|
-| **x86-64** |   ✅    |  ✅   |  ✅   |
-| **arm64**  |   ✅    |  ✅   |  ✅ (Apple Silicon) |
+|            | Windows | Linux | macOS | Android | iOS |
+|------------|:-------:|:-----:|:-----:|:-------:|:---:|
+| **x86-64** |   ✅    |  ✅   |  ✅   |   —     |  —  |
+| **arm64**  |   ✅    |  ✅   |  ✅ (Apple Silicon) | ✅ | ❌ |
 
-Requires a little-endian CPU that allows unaligned loads
-(`PLATFORM_LITTLE_ENDIAN && PLATFORM_SUPPORTS_UNALIGNED_LOADS`). Both x64
-and arm64 qualify.
+Requires a little-endian CPU (`PLATFORM_LITTLE_ENDIAN`). Both x64
+and arm64 qualify. Unaligned loads/stores are handled via `memcpy`
+helpers, so no hardware unaligned-load support is required.
 
-> **Cross-platform correctness.** Both the byte-aligned and bit-unaligned
-> fast paths are compiled and exercised on all three host OSes in CI —
-> standalone `-O2` (MSVC, GCC, Clang), an additional `-O0` sweep on
-> Linux/macOS, and an UBSan+ASan run on Linux — and each covers the
-> 10 000-trial randomized correctness suite plus the page-boundary /
+**iOS / tvOS** — Apple enforces W^X and mandatory code-signing on all
+executable pages; runtime inline-hook patching is impossible. The module
+still compiles (graceful no-op) but the hook is never installed.
+
+**Android** — The Linux kernel on Android allows `mprotect(RWX)` on code
+pages and there is no runtime code-signing enforcement, so the hook works
+normally.
+
+**Big-endian platforms** — The optimized implementation is compiled out
+entirely; the module loads but does nothing (no hook, no overhead).
+
+> **Actual test coverage.** The plugin has been tested on three operating
+> systems (Windows / Linux / macOS) × two CPU architectures (x86-64 /
+> arm64). CI compiles and exercises both the byte-aligned and bit-unaligned
+> fast paths at `-O2` (MSVC, GCC, Clang), plus an additional `-O0` sweep
+> on Linux/macOS and an UBSan+ASan run on Linux — each covering the
+> 10 000-trial randomized correctness suite plus page-boundary /
 > deterministic edge cases. The speed-up figures in the table above were
 > measured on Windows (MSVC); absolute numbers on Linux/macOS will vary
 > with compiler and host CPU, but the implementation path is the same.
->
-> History note: issue
-> [#2](https://github.com/chen3feng/FastBitCopy/issues/2) tracked an
-> earlier `-O2` divergence on GCC/Clang that was resolved before the
-> standalone CI job became blocking. The root causes were a
-> dangling-reference bug in the CI shim's `FMath::Min`/`Max` (PR #6)
-> and an alignment-UB in `CopyBitsSrcAligned` (PR #7). All three
-> defensive compile-time barriers that were added as workarounds
-> (`FASTBITCOPY_SAFE_OPT`, `FASTBITCOPY_NOINLINE`, and the inline-asm
-> `"memory"` compiler barrier) have since been removed (PRs #9, #10,
-> #11) with CI remaining green at each step, confirming the fixes
-> addressed the true root causes.
+> Android arm64 is cross-compiled with the NDK and executed via QEMU
+> user-mode emulation in CI, verifying algorithm correctness on the
+> actual target ABI.
 
 ## Installation
 
@@ -115,12 +118,57 @@ Download the repo as a zip, extract, rename the top-level folder to
 Then regenerate project files and rebuild — that's it. The hook installs
 itself during engine initialization; there are no APIs to call.
 
+## Building & testing locally (with a real UE source build)
+
+The repository includes convenience scripts for building the `TestHost`
+project against a local Unreal Engine source checkout:
+
+```bash
+# Windows
+build_testhost.bat              # Editor (Development)
+build_testhost.bat Game         # Game client (Development)
+build_testhost.bat test         # Build Editor + run automation tests
+
+# Linux / macOS
+./build_testhost.sh             # Editor (Development)
+./build_testhost.sh Game        # Game client (Development)
+./build_testhost.sh test        # Build Editor + run automation tests
+```
+
+Dedicated test scripts that cover both link modes:
+
+```bash
+# Windows
+run_testhost.bat               # Full suite: Editor build+test, Game build
+run_testhost.bat editor        # Editor only: build + automation tests
+run_testhost.bat game          # Game only: build (static link verification)
+run_testhost.bat --no-build    # Skip build, run Editor tests only
+
+# Linux / macOS
+./run_testhost.sh              # Full suite: Editor build+test, Game build
+./run_testhost.sh editor       # Editor only: build + automation tests
+./run_testhost.sh game         # Game only: build (static link verification)
+./run_testhost.sh --no-build   # Skip build, run Editor tests only
+```
+
+By default the scripts look for `../UnrealEngine` (a sibling directory).
+To override, create a `.env` file in the repo root (see `.env.example`):
+
+```
+ENGINE_ROOT=E:\UnrealEngine
+```
+
 Repository layout:
 
 ```
 FastBitCopy/
 ├── FastBitCopy.uplugin
 ├── README.md / README_CN.md
+├── build_testhost.bat            # Windows build script
+├── build_testhost.sh             # Linux/macOS build script
+├── run_testhost.bat             # Windows test script (Editor + Game)
+├── run_testhost.sh              # Linux/macOS test script (Editor + Game)
+├── .env.example                  # ENGINE_ROOT configuration template
 ├── Source/
 │   ├── FastBitCopy/              # runtime module (installs the hook)
 │   │   ├── FastBitCopy.Build.cs
@@ -137,6 +185,10 @@ FastBitCopy/
 │       └── Private/
 │           ├── FastBitCopyTestsModule.cpp
 │           └── FastBitCopyTests.cpp
+├── CI/                           # standalone CI harness (no UE required)
+│   ├── CMakeLists.txt
+│   ├── test_main.cpp
+│   └── ue_shim.h
 └── TestHost/                     # optional standalone test project
     ├── FastBitCopyHost.uproject  # uses AdditionalPluginDirectories: [".."]
     └── Source/FastBitCopyHost/

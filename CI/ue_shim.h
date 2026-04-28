@@ -24,9 +24,6 @@ using int64  = std::int64_t;
 #ifndef PLATFORM_LITTLE_ENDIAN
 #define PLATFORM_LITTLE_ENDIAN 1
 #endif
-#ifndef PLATFORM_SUPPORTS_UNALIGNED_LOADS
-#define PLATFORM_SUPPORTS_UNALIGNED_LOADS 1
-#endif
 
 // ---- Attribute macros ----
 #ifndef FORCEINLINE
@@ -39,6 +36,10 @@ using int64  = std::int64_t;
 
 #ifndef CORE_API
 #define CORE_API
+#endif
+
+#ifndef FASTBITCOPY_API
+#define FASTBITCOPY_API
 #endif
 
 // ---- CoreMinimal.h / Math / Memory shims ----

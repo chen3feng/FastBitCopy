@@ -16,13 +16,12 @@ DEFINE_LOG_CATEGORY_STATIC(LogFastBitCopy, Log, All);
 CORE_API void appBitsCpy(uint8* Dest, int32 DestBit, uint8* Src, int32 SrcBit, int32 BitCount);
 
 // Build-path self-identification probe, defined in BitCopyFast.cpp. Returns 1
-// iff that translation unit compiled the real optimized path, 0 if it
-// compiled the fallback-to-stock path. The latter happens on any compiler
-// where we have not yet validated the optimized code (currently: everything
-// except MSVC, see issue #2). Installing the hook in the fallback case would
-// create an infinite recursion (HookedAppBitsCpy -> appBitsCpyFastImpl ->
-// appBitsCpy -> HookedAppBitsCpy -> ...), so we must gate off of it.
-CORE_API int FastBitCopy_IsOptimizedBuild();
+// iff that translation unit compiled the real optimized path (the
+// PLATFORM_LITTLE_ENDIAN branch), 0 if it compiled the fallback-to-stock
+// path. Installing the hook in the fallback case would create an infinite
+// recursion (HookedAppBitsCpy -> appBitsCpyFastImpl -> appBitsCpy ->
+// HookedAppBitsCpy -> ...), so we gate on this probe.
+int FastBitCopy_IsOptimizedBuild();
 
 namespace
 {
@@ -38,15 +37,20 @@ namespace
 
 void FFastBitCopyModule::StartupModule()
 {
-#if PLATFORM_LITTLE_ENDIAN && PLATFORM_SUPPORTS_UNALIGNED_LOADS
+#if !PLATFORM_LITTLE_ENDIAN
+	UE_LOG(LogFastBitCopy, Log, TEXT("FastBitCopy: big-endian platform, skipping hook."));
+#elif !FASTBITCOPY_PLATFORM_SUPPORTS_HOOK
+	// iOS/tvOS: kernel enforces W^X + code-signing on all executable pages.
+	// Runtime inline-hook patching is impossible; skip without attempting.
+	UE_LOG(LogFastBitCopy, Log, TEXT("FastBitCopy: platform does not support runtime code patching (iOS/tvOS), skipping hook."));
+#else
 	if (FastBitCopy_IsOptimizedBuild() == 0)
 	{
 		// BitCopyFast.cpp compiled the fallback path (appBitsCpyFastImpl
 		// is just a thunk to appBitsCpy). Installing the hook here would
 		// turn that thunk into an infinite self-call. Skip.
 		UE_LOG(LogFastBitCopy, Log,
-			   TEXT("FastBitCopy: compiled in fallback mode on this toolchain; skipping hook. ")
-				   TEXT("(see issue #2 for the MSVC-vs-GCC/Clang investigation)"));
+			   TEXT("FastBitCopy: compiled in fallback mode (platform does not meet requirements); skipping hook."));
 		return;
 	}
 
@@ -69,8 +73,6 @@ void FFastBitCopyModule::StartupModule()
 	{
 		UE_LOG(LogFastBitCopy, Warning, TEXT("Failed to install runtime hook for appBitsCpy. Falling back to UE's implementation."));
 	}
-#else
-	UE_LOG(LogFastBitCopy, Log, TEXT("FastBitCopy: unsupported platform, skipping hook."));
 #endif
 }
 

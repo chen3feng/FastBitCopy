@@ -48,31 +48,33 @@ UE 自带的 `appBitsCpy` 是逐字节处理的标量实现。在 x86-64 与 arm
 
 ## 支持的平台
 
-|            | Windows | Linux | macOS |
-|------------|:-------:|:-----:|:-----:|
-| **x86-64** |   ✅    |  ✅   |  ✅   |
-| **arm64**  |   ✅    |  ✅   |  ✅（Apple Silicon） |
+|            | Windows | Linux | macOS | Android | iOS |
+|------------|:-------:|:-----:|:-----:|:-------:|:---:|
+| **x86-64** |   ✅    |  ✅   |  ✅   |   —     |  —  |
+| **arm64**  |   ✅    |  ✅   |  ✅（Apple Silicon） | ✅ | ❌ |
 
-需要满足 `PLATFORM_LITTLE_ENDIAN && PLATFORM_SUPPORTS_UNALIGNED_LOADS`
-（x64、arm64 都满足）。
+需要满足 `PLATFORM_LITTLE_ENDIAN`（x64、arm64 都满足）。
+非对齐访问通过 `memcpy` 辅助函数处理，不依赖硬件非对齐加载支持。
 
-> **跨平台正确性。** 三大主机 OS 上 CI 都会在 `-O2` 下（MSVC / GCC /
-> Clang）编译并运行字节对齐与位不对齐两条快速路径，外加 Linux/macOS
-> 的 `-O0` 对照扫、以及 Linux 上的一次 UBSan + ASan 专项，每项都覆盖
-> 10 000 组随机 `(SrcBit, DstBit, BitCount)` 正确性测试和页边界 /
-> 确定性边界用例。上面表中的加速比是在 Windows (MSVC) 上测得，
-> Linux/macOS 上的绝对数字会随编译器和宿主 CPU 不同而变化，但走的
-> 是同一条优化实现路径。
->
-> 历史记录：Issue
-> [#2](https://github.com/chen3feng/FastBitCopy/issues/2) 跟踪过早期
-> GCC/Clang `-O2` 下位不对齐路径与引用实现不一致的问题，在
-> standalone CI job 转为阻塞门禁之前已得到解决。根本原因是 CI shim
-> 中 `FMath::Min`/`Max` 的悬垂引用（PR #6）以及 `CopyBitsSrcAligned`
-> 中的对齐 UB（PR #7）。作为临时方案添加的三道防御性编译时屏障
-> （`FASTBITCOPY_SAFE_OPT`、`FASTBITCOPY_NOINLINE`、内联汇编
-> `"memory"` 编译器屏障）已全部移除（PR #9、#10、#11），每一步 CI
-> 均保持全绿，确认修复针对的是真正的根因。
+**iOS / tvOS** — Apple 对所有可执行页强制执行 W^X 和代码签名验证，
+运行时 inline hook 不可能实现。模块仍然编译（优雅降级为空操作），
+但 hook 永远不会安装。
+
+**Android** — Android 上的 Linux 内核允许 `mprotect(RWX)` 修改代码页，
+且没有运行时代码签名强制验证，hook 正常工作。
+
+**Big-endian 平台** — 优化实现在编译期完全排除；模块加载但不做任何
+事情（不 hook、无额外开销）。
+
+> **实际测试覆盖。** 目前已在三种操作系统（Windows / Linux / macOS）×
+> 两种 CPU 架构（x86-64 / arm64）上实际测试通过。CI 在 `-O2` 下
+>（MSVC / GCC / Clang）编译并运行字节对齐与位不对齐两条快速路径，
+> 外加 Linux/macOS 的 `-O0` 对照扫、以及 Linux 上的一次 UBSan + ASan
+> 专项，每项都覆盖 10 000 组随机 `(SrcBit, DstBit, BitCount)` 正确性
+> 测试和页边界 / 确定性边界用例。上面表中的加速比是在 Windows (MSVC)
+> 上测得，Linux/macOS 上的绝对数字会随编译器和宿主 CPU 不同而变化，
+> 但走的是同一条优化实现路径。Android arm64 通过 NDK 交叉编译并在 CI
+> 中以 QEMU 用户态模拟执行，验证了目标 ABI 上的算法正确性。
 
 ## 安装
 
@@ -113,12 +115,56 @@ git subtree pull --prefix=Plugins/FastBitCopy \
 然后重新生成工程文件、重新编译。Hook 会在引擎初始化阶段自动安装，
 无需调用任何 API。
 
+## 本地构建与测试（使用真实 UE 源码构建）
+
+仓库自带便捷脚本，可直接用本地 UE 源码构建 `TestHost` 工程：
+
+```bash
+# Windows
+build_testhost.bat              # Editor（Development）
+build_testhost.bat Game         # Game 客户端（Development）
+build_testhost.bat test         # 编译 Editor + 运行自动化测试
+
+# Linux / macOS
+./build_testhost.sh             # Editor（Development）
+./build_testhost.sh Game        # Game 客户端（Development）
+./build_testhost.sh test        # 编译 Editor + 运行自动化测试
+```
+
+专用测试脚本，覆盖两种链接模式：
+
+```bash
+# Windows
+run_testhost.bat               # 全套：Editor 编译+测试，Game 编译
+run_testhost.bat editor        # 仅 Editor：编译 + 自动化测试
+run_testhost.bat game          # 仅 Game：编译（静态链接验证）
+run_testhost.bat --no-build    # 跳过编译，仅运行 Editor 测试
+
+# Linux / macOS
+./run_testhost.sh              # 全套：Editor 编译+测试，Game 编译
+./run_testhost.sh editor       # 仅 Editor：编译 + 自动化测试
+./run_testhost.sh game         # 仅 Game：编译（静态链接验证）
+./run_testhost.sh --no-build   # 跳过编译，仅运行 Editor 测试
+```
+
+脚本默认查找 `../UnrealEngine`（同级目录）。如需自定义，在仓库根目录
+创建 `.env` 文件（参考 `.env.example`）：
+
+```
+ENGINE_ROOT=E:\UnrealEngine
+```
+
 仓库目录结构：
 
 ```
 FastBitCopy/
 ├── FastBitCopy.uplugin
 ├── README.md / README_CN.md
+├── build_testhost.bat            # Windows 构建脚本
+├── build_testhost.sh             # Linux/macOS 构建脚本
+├── run_testhost.bat             # Windows 测试脚本（Editor + Game）
+├── run_testhost.sh              # Linux/macOS 测试脚本（Editor + Game）
+├── .env.example                  # ENGINE_ROOT 配置模板
 ├── Source/
 │   ├── FastBitCopy/              # 运行时模块（安装 Hook）
 │   │   ├── FastBitCopy.Build.cs
@@ -135,6 +181,10 @@ FastBitCopy/
 │       └── Private/
 │           ├── FastBitCopyTestsModule.cpp
 │           └── FastBitCopyTests.cpp
+├── CI/                           # 独立 CI 测试（无需 UE）
+│   ├── CMakeLists.txt
+│   ├── test_main.cpp
+│   └── ue_shim.h
 └── TestHost/                     # 可选的独立测试宿主工程
     ├── FastBitCopyHost.uproject  # 通过 AdditionalPluginDirectories: [".."] 加载
     └── Source/FastBitCopyHost/
