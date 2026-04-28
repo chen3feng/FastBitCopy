@@ -48,13 +48,23 @@ UE 自带的 `appBitsCpy` 是逐字节处理的标量实现。在 x86-64 与 arm
 
 ## 支持的平台
 
-|            | Windows | Linux | macOS |
-|------------|:-------:|:-----:|:-----:|
-| **x86-64** |   ✅    |  ✅   |  ✅   |
-| **arm64**  |   ✅    |  ✅   |  ✅（Apple Silicon） |
+|            | Windows | Linux | macOS | Android | iOS |
+|------------|:-------:|:-----:|:-----:|:-------:|:---:|
+| **x86-64** |   ✅    |  ✅   |  ✅   |   —     |  —  |
+| **arm64**  |   ✅    |  ✅   |  ✅（Apple Silicon） | ✅ | ❌ |
 
 需要满足 `PLATFORM_LITTLE_ENDIAN`（x64、arm64 都满足）。
 非对齐访问通过 `memcpy` 辅助函数处理，不依赖硬件非对齐加载支持。
+
+**iOS / tvOS** — Apple 对所有可执行页强制执行 W^X 和代码签名验证，
+运行时 inline hook 不可能实现。模块仍然编译（优雅降级为空操作），
+但 hook 永远不会安装。
+
+**Android** — Android 上的 Linux 内核允许 `mprotect(RWX)` 修改代码页，
+且没有运行时代码签名强制验证，hook 正常工作。
+
+**Big-endian 平台** — 优化实现在编译期完全排除；模块加载但不做任何
+事情（不 hook、无额外开销）。
 
 > **跨平台正确性。** 三大主机 OS 上 CI 都会在 `-O2` 下（MSVC / GCC /
 > Clang）编译并运行字节对齐与位不对齐两条快速路径，外加 Linux/macOS

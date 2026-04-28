@@ -46,14 +46,25 @@ x86-64 and arm64 we can do much better with aligned 64-bit loads/stores plus
 
 ## Supported platforms
 
-|            | Windows | Linux | macOS |
-|------------|:-------:|:-----:|:-----:|
-| **x86-64** |   ✅    |  ✅   |  ✅   |
-| **arm64**  |   ✅    |  ✅   |  ✅ (Apple Silicon) |
+|            | Windows | Linux | macOS | Android | iOS |
+|------------|:-------:|:-----:|:-----:|:-------:|:---:|
+| **x86-64** |   ✅    |  ✅   |  ✅   |   —     |  —  |
+| **arm64**  |   ✅    |  ✅   |  ✅ (Apple Silicon) | ✅ | ❌ |
 
 Requires a little-endian CPU (`PLATFORM_LITTLE_ENDIAN`). Both x64
 and arm64 qualify. Unaligned loads/stores are handled via `memcpy`
 helpers, so no hardware unaligned-load support is required.
+
+**iOS / tvOS** — Apple enforces W^X and mandatory code-signing on all
+executable pages; runtime inline-hook patching is impossible. The module
+still compiles (graceful no-op) but the hook is never installed.
+
+**Android** — The Linux kernel on Android allows `mprotect(RWX)` on code
+pages and there is no runtime code-signing enforcement, so the hook works
+normally.
+
+**Big-endian platforms** — The optimized implementation is compiled out
+entirely; the module loads but does nothing (no hook, no overhead).
 
 > **Cross-platform correctness.** Both the byte-aligned and bit-unaligned
 > fast paths are compiled and exercised on all three host OSes in CI —
