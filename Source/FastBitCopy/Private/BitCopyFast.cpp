@@ -25,19 +25,12 @@
 #define FASTBITCOPY_COMPILER_BARRIER() std::atomic_thread_fence(std::memory_order_seq_cst)
 #endif
 
-// Prevent inlining of the top-level entry points. If GCC/Clang inlines
-// BitsCopyFastUnaligned into appBitsCpyFastImpl and then into a caller
-// whose output it can statically see, the aggressive interprocedural
-// dead-store elimination can delete the whole thing (observed on
-// Linux -O2). Keeping the hot functions in their own frame shuts that
-// path down with no measurable runtime cost on the bulk workload.
-#if defined(__GNUC__) || defined(__clang__)
-#define FASTBITCOPY_NOINLINE __attribute__((noinline))
-#elif defined(_MSC_VER)
-#define FASTBITCOPY_NOINLINE __declspec(noinline)
-#else
-#define FASTBITCOPY_NOINLINE
-#endif
+// FASTBITCOPY_NOINLINE was a defensive noinline attribute added to prevent
+// GCC/Clang from inlining the hot functions into callers and then applying
+// aggressive interprocedural dead-store elimination. The root causes of
+// the observed -O2 divergence turned out to be a dangling-reference bug
+// in FMath::Min/Max (PR #6) and alignment UB (PR #7), not an inlining
+// issue. Removed: the compiler is now free to inline as it sees fit.
 
 // FASTBITCOPY_SAFE_OPT was a per-function optimization override that
 // compiled the hot helpers at -O0 on GCC/Clang to work around a
@@ -50,7 +43,7 @@
 #if PLATFORM_LITTLE_ENDIAN && PLATFORM_SUPPORTS_UNALIGNED_LOADS
 
 // Copy bits when BitOffset of Src and Dest are same.
-static FASTBITCOPY_NOINLINE void BitsCopyFastAligned(uint8 *Dest, uint8 *Src, int BitOffset, int BitCount)
+static void BitsCopyFastAligned(uint8 *Dest, uint8 *Src, int BitOffset, int BitCount)
 {
 	// Copy leading bits: Align to byte boundary
 	if (BitOffset != 0)
@@ -117,7 +110,7 @@ static FORCEINLINE void StoreWordUnaligned(WordType *P, WordType W)
 
 // Copy bits with source bit offset aligned.
 template <typename WordType>
-static FASTBITCOPY_NOINLINE void CopyBitsSrcAligned(WordType *Dest, int DestBit, WordType *Src, int BitCount)
+static void CopyBitsSrcAligned(WordType *Dest, int DestBit, WordType *Src, int BitCount)
 {
 	// Handle middle words
 	const int BitsPerWord = sizeof(WordType) * 8;
@@ -197,7 +190,7 @@ static FASTBITCOPY_NOINLINE void CopyBitsSrcAligned(WordType *Dest, int DestBit,
 	}
 }
 
-static FASTBITCOPY_NOINLINE void BitsCopyFastUnaligned(uint8 *Dest, int DestBit, uint8 *Src, int SrcBit, int BitCount)
+static void BitsCopyFastUnaligned(uint8 *Dest, int DestBit, uint8 *Src, int SrcBit, int BitCount)
 {
 	// Align SrcBit to 0
 	if (SrcBit != 0)
@@ -257,17 +250,10 @@ static FASTBITCOPY_NOINLINE void BitsCopyFastUnaligned(uint8 *Dest, int DestBit,
 // ----------------------------------------------------------------------------
 // Original appBitsCpy (kept verbatim for benchmarking & as a fallback reference)
 // ----------------------------------------------------------------------------
-// NOTE: we deliberately do NOT FORCEINLINE this on GCC/Clang. Inlining it
-// into appBitsCpyFastImpl turned out to expose a codegen bug on Linux
-// GCC -O2 (see issue #2 / uninitialised-stack-slot analysis) that
-// manifested as a SegFault in CI when we used this function as the
-// non-MSVC fallback for the unaligned path.
-#if defined(_MSC_VER)
-#define FASTBITCOPY_ORIG_INLINE FORCEINLINE
-#else
-#define FASTBITCOPY_ORIG_INLINE FASTBITCOPY_NOINLINE
-#endif
-static FASTBITCOPY_ORIG_INLINE void OriginalAppBitsCpy(uint8 *Dest, int32 DestBit, uint8 *Src, int32 SrcBit, int32 BitCount)
+// The original appBitsCpy reference implementation. FORCEINLINE on all
+// platforms: it is only called from OriginalAppBitsCpyForTest (benchmark
+// harness) and the compiler can decide whether to actually inline it.
+static FORCEINLINE void OriginalAppBitsCpy(uint8 *Dest, int32 DestBit, uint8 *Src, int32 SrcBit, int32 BitCount)
 {
 	if (BitCount <= 8)
 	{
@@ -359,7 +345,7 @@ void OriginalAppBitsCpyForTest(uint8* Dest, int32 DestBit, uint8* Src, int32 Src
 }
 
 // Our optimized bit copy entry point.
-FASTBITCOPY_NOINLINE void appBitsCpyFastImpl(uint8 *Dest, int32 DestBit, uint8 *Src, int32 SrcBit, int32 BitCount)
+void appBitsCpyFastImpl(uint8 *Dest, int32 DestBit, uint8 *Src, int32 SrcBit, int32 BitCount)
 {
 	// Align to byte bound.
 	Dest += DestBit / 8;

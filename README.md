@@ -70,10 +70,11 @@ and arm64 qualify.
 > standalone CI job became blocking. The root causes were a
 > dangling-reference bug in the CI shim's `FMath::Min`/`Max` (PR #6)
 > and an alignment-UB in `CopyBitsSrcAligned` (PR #7). The per-function
-> `optnone`/`optimize("O0")` override (`FASTBITCOPY_SAFE_OPT`) has been
-> removed; two lighter defensive barriers remain (`FASTBITCOPY_NOINLINE`
-> and an inline-asm `"memory"` compiler barrier) and will be peeled back
-> in follow-up PRs, re-verifying CI at each step.
+> `optnone`/`optimize("O0")` override and the `noinline` attribute have
+> both been removed (PRs #9 and #10). One lightweight defensive barrier
+> remains — an inline-asm `"memory"` compiler barrier between the
+> leading-byte `uint8*` fixup and the `uint64*` bulk copy — and will be
+> removed in a follow-up PR once verified.
 
 ## Installation
 
