@@ -124,16 +124,16 @@ Dedicated test scripts that cover both link modes:
 
 ```bash
 # Windows
-test_testhost.bat               # Full suite: Editor build+test, Game build
-test_testhost.bat editor        # Editor only: build + automation tests
-test_testhost.bat game          # Game only: build (static link verification)
-test_testhost.bat --no-build    # Skip build, run Editor tests only
+run_testhost.bat               # Full suite: Editor build+test, Game build
+run_testhost.bat editor        # Editor only: build + automation tests
+run_testhost.bat game          # Game only: build (static link verification)
+run_testhost.bat --no-build    # Skip build, run Editor tests only
 
 # Linux / macOS
-./test_testhost.sh              # Full suite: Editor build+test, Game build
-./test_testhost.sh editor       # Editor only: build + automation tests
-./test_testhost.sh game         # Game only: build (static link verification)
-./test_testhost.sh --no-build   # Skip build, run Editor tests only
+./run_testhost.sh              # Full suite: Editor build+test, Game build
+./run_testhost.sh editor       # Editor only: build + automation tests
+./run_testhost.sh game         # Game only: build (static link verification)
+./run_testhost.sh --no-build   # Skip build, run Editor tests only
 ```
 
 By default the scripts look for `../UnrealEngine` (a sibling directory).
@@ -151,8 +151,8 @@ FastBitCopy/
 ├── README.md / README_CN.md
 ├── build_testhost.bat            # Windows build script
 ├── build_testhost.sh             # Linux/macOS build script
-├── test_testhost.bat             # Windows test script (Editor + Game)
-├── test_testhost.sh              # Linux/macOS test script (Editor + Game)
+├── run_testhost.bat             # Windows test script (Editor + Game)
+├── run_testhost.sh              # Linux/macOS test script (Editor + Game)
 ├── .env.example                  # ENGINE_ROOT configuration template
 ├── Source/
 │   ├── FastBitCopy/              # runtime module (installs the hook)

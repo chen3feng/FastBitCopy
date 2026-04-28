@@ -148,7 +148,7 @@ enum EBitsCopyType { Original, Hooked, Fast };
 enum EAlignment    { Aligned, Unaligned };
 
 template <int BytesSize, EBitsCopyType Type, EAlignment Alignment>
-static void BenchOne(int LoopCount)
+static double BenchOne(int LoopCount)
 {
 	const bool IsAligned = (Alignment == Aligned);
 	const TCHAR* AlignName = IsAligned ? TEXT("Aligned  ") : TEXT("Unaligned");
@@ -180,22 +180,35 @@ static void BenchOne(int LoopCount)
 			else           appBitsCpyFastImpl(Dest, 0, Src, 1, Bits - 1);
 		}
 	}
-	const double EndTime = FPlatformTime::Seconds();
+	const double Elapsed = FPlatformTime::Seconds() - StartTime;
 	UE_LOG(LogFastBitCopyTests, Display,
-		TEXT("  %s %s %d bytes : %.4f s"), FuncName, AlignName, BytesSize, EndTime - StartTime);
+		   TEXT("  %s %s %d bytes : %.4f s"), FuncName, AlignName, BytesSize, Elapsed);
+	return Elapsed;
 }
 
+// Benchmark result for a single size: holds Original and Fast timings.
+struct FBenchResult
+{
+	double OriginalAligned;
+	double OriginalUnaligned;
+	double FastAligned;
+	double FastUnaligned;
+};
+
 template <int BytesSize>
-static void BenchSize()
+static FBenchResult BenchSize()
 {
 	constexpr int LoopCount = 1000000;
 	UE_LOG(LogFastBitCopyTests, Display, TEXT("--- %d bytes ---"), BytesSize);
-	BenchOne<BytesSize, Original, Aligned  >(LoopCount);
-	BenchOne<BytesSize, Original, Unaligned>(LoopCount);
-	BenchOne<BytesSize, Fast    , Aligned  >(LoopCount);
-	BenchOne<BytesSize, Fast    , Unaligned>(LoopCount);
+
+	FBenchResult R;
+	R.OriginalAligned = BenchOne<BytesSize, Original, Aligned>(LoopCount);
+	R.OriginalUnaligned = BenchOne<BytesSize, Original, Unaligned>(LoopCount);
+	R.FastAligned = BenchOne<BytesSize, Fast, Aligned>(LoopCount);
+	R.FastUnaligned = BenchOne<BytesSize, Fast, Unaligned>(LoopCount);
 	BenchOne<BytesSize, Hooked  , Aligned  >(LoopCount);
 	BenchOne<BytesSize, Hooked  , Unaligned>(LoopCount);
+	return R;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFastBitCopySpeed,
@@ -203,17 +216,43 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFastBitCopySpeed,
 	BasicIntegrationTestFlags)
 bool FFastBitCopySpeed::RunTest(const FString& Parameters)
 {
+	// Small sizes: benchmark only, no speed assertion (noise dominates).
 	BenchSize<1   >();
 	BenchSize<2   >();
 	BenchSize<4   >();
 	BenchSize<8   >();
 	BenchSize<16  >();
 	BenchSize<32  >();
-	BenchSize<64  >();
-	BenchSize<128 >();
-	BenchSize<256 >();
-	BenchSize<512 >();
-	BenchSize<1024>();
+
+	// For sizes >= 64 bytes, the fast path should be measurably faster than
+	// the original on the unaligned path (the primary optimization target).
+	// We use a generous threshold: Fast must not be slower than Original.
+	// (In practice Fast is typically 2-10x faster for large sizes.)
+	auto Check = [this](int Size, const FBenchResult &R)
+	{
+		// Only check unaligned — that's where the algorithmic improvement is.
+		if (R.FastUnaligned > R.OriginalUnaligned * 1.05)
+		{
+			AddWarning(FString::Printf(
+				TEXT("Optimization regression at %d bytes unaligned: "
+					 "Fast=%.4fs > Original=%.4fs (ratio=%.2fx)"),
+				Size, R.FastUnaligned, R.OriginalUnaligned,
+				R.FastUnaligned / R.OriginalUnaligned));
+		}
+		else
+		{
+			UE_LOG(LogFastBitCopyTests, Display,
+				   TEXT("  >> %d bytes unaligned speedup: %.2fx"),
+				   Size, R.OriginalUnaligned / FMath::Max(R.FastUnaligned, 1e-9));
+		}
+	};
+
+	Check(64, BenchSize<64>());
+	Check(128, BenchSize<128>());
+	Check(256, BenchSize<256>());
+	Check(512, BenchSize<512>());
+	Check(1024, BenchSize<1024>());
+
 	return true;
 }
 

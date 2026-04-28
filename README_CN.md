@@ -123,16 +123,16 @@ build_testhost.bat test         # 编译 Editor + 运行自动化测试
 
 ```bash
 # Windows
-test_testhost.bat               # 全套：Editor 编译+测试，Game 编译
-test_testhost.bat editor        # 仅 Editor：编译 + 自动化测试
-test_testhost.bat game          # 仅 Game：编译（静态链接验证）
-test_testhost.bat --no-build    # 跳过编译，仅运行 Editor 测试
+run_testhost.bat               # 全套：Editor 编译+测试，Game 编译
+run_testhost.bat editor        # 仅 Editor：编译 + 自动化测试
+run_testhost.bat game          # 仅 Game：编译（静态链接验证）
+run_testhost.bat --no-build    # 跳过编译，仅运行 Editor 测试
 
 # Linux / macOS
-./test_testhost.sh              # 全套：Editor 编译+测试，Game 编译
-./test_testhost.sh editor       # 仅 Editor：编译 + 自动化测试
-./test_testhost.sh game         # 仅 Game：编译（静态链接验证）
-./test_testhost.sh --no-build   # 跳过编译，仅运行 Editor 测试
+./run_testhost.sh              # 全套：Editor 编译+测试，Game 编译
+./run_testhost.sh editor       # 仅 Editor：编译 + 自动化测试
+./run_testhost.sh game         # 仅 Game：编译（静态链接验证）
+./run_testhost.sh --no-build   # 跳过编译，仅运行 Editor 测试
 ```
 
 脚本默认查找 `../UnrealEngine`（同级目录）。如需自定义，在仓库根目录
@@ -150,8 +150,8 @@ FastBitCopy/
 ├── README.md / README_CN.md
 ├── build_testhost.bat            # Windows 构建脚本
 ├── build_testhost.sh             # Linux/macOS 构建脚本
-├── test_testhost.bat             # Windows 测试脚本（Editor + Game）
-├── test_testhost.sh              # Linux/macOS 测试脚本（Editor + Game）
+├── run_testhost.bat             # Windows 测试脚本（Editor + Game）
+├── run_testhost.sh              # Linux/macOS 测试脚本（Editor + Game）
 ├── .env.example                  # ENGINE_ROOT 配置模板
 ├── Source/
 │   ├── FastBitCopy/              # 运行时模块（安装 Hook）

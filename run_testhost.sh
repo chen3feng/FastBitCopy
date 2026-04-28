@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-#  test_testhost.sh — Build & run FastBitCopy TestHost tests (Linux / macOS)
+#  run_testhost.sh — Build & run FastBitCopy TestHost tests (Linux / macOS)
 #
 #  Covers both Editor (dynamic linking) and Game (static linking) targets.
 #
@@ -8,10 +8,10 @@
 #  to ../UnrealEngine (sibling directory).
 #
 #  Usage:
-#    ./test_testhost.sh              — Run all (Editor build+test, Game build)
-#    ./test_testhost.sh editor       — Editor only: build + automation tests
-#    ./test_testhost.sh game         — Game only: build (link verification)
-#    ./test_testhost.sh --no-build   — Skip build, run Editor tests only
+#    ./run_testhost.sh              — Run all (Editor build+test, Game build)
+#    ./run_testhost.sh editor       — Editor only: build + automation tests
+#    ./run_testhost.sh game         — Game only: build (link verification)
+#    ./run_testhost.sh --no-build   — Skip build, run Editor tests only
 # ============================================================
 set -uo pipefail
 # Note: we do NOT use `set -e` because we want to continue after individual
@@ -71,10 +71,13 @@ if [[ ! -e "${PLUGIN_ROOT}/FastBitCopy.uplugin" ]]; then
 fi
 
 # ---- Editor command path ----
+# On Mac, UE builds a separate UnrealEditor-Cmd binary (no .app bundle).
+# On Linux, there is no -Cmd variant; the main UnrealEditor binary serves
+# both interactive and commandlet modes.
 if [[ "${PLATFORM}" == "Mac" ]]; then
     EDITOR_CMD="${ENGINE_ROOT}/Engine/Binaries/Mac/UnrealEditor-Cmd"
 else
-    EDITOR_CMD="${ENGINE_ROOT}/Engine/Binaries/Linux/UnrealEditor-Cmd"
+    EDITOR_CMD="${ENGINE_ROOT}/Engine/Binaries/Linux/UnrealEditor"
 fi
 
 # ---- Helpers ----

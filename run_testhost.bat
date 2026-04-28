@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 
 REM ============================================================
-REM  test_testhost.bat — Build & run FastBitCopy TestHost tests (Windows)
+REM  run_testhost.bat — Build & run FastBitCopy TestHost tests (Windows)
 REM
 REM  Covers both Editor (dynamic linking) and Game (static linking) targets.
 REM
@@ -10,10 +10,10 @@ REM  Reads ENGINE_ROOT from .env (if present), otherwise defaults
 REM  to ..\UnrealEngine (sibling directory).
 REM
 REM  Usage:
-REM    test_testhost.bat              — Run all (Editor build+test, Game build)
-REM    test_testhost.bat editor       — Editor only: build + automation tests
-REM    test_testhost.bat game         — Game only: build (link verification)
-REM    test_testhost.bat --no-build   — Skip build, run Editor tests only
+REM    run_testhost.bat              — Run all (Editor build+test, Game build)
+REM    run_testhost.bat editor       — Editor only: build + automation tests
+REM    run_testhost.bat game         — Game only: build (link verification)
+REM    run_testhost.bat --no-build   — Skip build, run Editor tests only
 REM ============================================================
 
 set "SCRIPT_DIR=%~dp0"

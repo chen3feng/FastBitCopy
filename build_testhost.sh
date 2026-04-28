@@ -100,10 +100,13 @@ if [[ "${TARGET_TYPE,,}" == "test" ]]; then
     echo ""
     echo "=== Step 2/2: Running automation tests ==="
     echo ""
+    # On Mac, UE builds a separate UnrealEditor-Cmd binary (no .app bundle).
+    # On Linux, there is no -Cmd variant; the main UnrealEditor binary serves
+    # both interactive and commandlet modes.
     if [[ "${PLATFORM}" == "Mac" ]]; then
         EDITOR_CMD="${ENGINE_ROOT}/Engine/Binaries/Mac/UnrealEditor-Cmd"
     else
-        EDITOR_CMD="${ENGINE_ROOT}/Engine/Binaries/Linux/UnrealEditor-Cmd"
+        EDITOR_CMD="${ENGINE_ROOT}/Engine/Binaries/Linux/UnrealEditor"
     fi
 
     if [[ ! -f "${EDITOR_CMD}" ]]; then
