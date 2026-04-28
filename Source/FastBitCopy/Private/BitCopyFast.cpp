@@ -8,6 +8,7 @@
 #include "CoreMinimal.h"
 #include "Math/UnrealMathUtility.h"
 #include <atomic>
+#include <cstring>
 
 // A *real* compiler barrier. std::atomic_signal_fence turned out to be
 // insufficient on Clang/GCC -O2 (it disciplines reorderings with respect to
@@ -94,6 +95,35 @@ static FASTBITCOPY_NOINLINE FASTBITCOPY_SAFE_OPT void BitsCopyFastAligned(uint8 
 	}
 }
 
+// Unaligned word load/store. Clang/GCC/MSVC all fold sizeof-bounded
+// memcpy of a trivially-copyable scalar to a single machine load/store
+// at -O1 and above, so this is both language-legal (no strict-aliasing
+// or alignment UB) *and* generates the same single `mov` we want on
+// x86/x64 and arm64. On platforms with hardware-misaligned-load support
+// (PLATFORM_SUPPORTS_UNALIGNED_LOADS) the runtime cost is identical to
+// a raw `*p` dereference; the difference is strictly in what the C++
+// standard and UBSan consider well-defined.
+//
+// Rationale for not just reverting to `Dest[i] = Src[i]`: `CopyBitsSrcAligned`
+// is called from `BitsCopyFastUnaligned` after a leading-byte alignment pass
+// that only guarantees *byte* alignment of the remaining pointer, then casts
+// it to `uint64*`. UBSan with `-fsanitize=alignment` correctly flags that
+// cast-then-dereference sequence as UB; wrapping the access in memcpy is the
+// standard, zero-cost resolution.
+template <typename WordType>
+static FORCEINLINE WordType LoadWordUnaligned(const WordType *P)
+{
+	WordType W;
+	std::memcpy(&W, P, sizeof(W));
+	return W;
+}
+
+template <typename WordType>
+static FORCEINLINE void StoreWordUnaligned(WordType *P, WordType W)
+{
+	std::memcpy(P, &W, sizeof(W));
+}
+
 // Copy bits with source bit offset aligned.
 template <typename WordType>
 static FASTBITCOPY_NOINLINE FASTBITCOPY_SAFE_OPT void CopyBitsSrcAligned(WordType *Dest, int DestBit, WordType *Src, int BitCount)
@@ -121,7 +151,7 @@ static FASTBITCOPY_NOINLINE FASTBITCOPY_SAFE_OPT void CopyBitsSrcAligned(WordTyp
 		{
 			for (int i = 0; i < LoopCount; ++i)
 			{
-				Dest[i] = Src[i];
+				StoreWordUnaligned(&Dest[i], LoadWordUnaligned(&Src[i]));
 			}
 		}
 		else
@@ -130,9 +160,11 @@ static FASTBITCOPY_NOINLINE FASTBITCOPY_SAFE_OPT void CopyBitsSrcAligned(WordTyp
 			const uint32 UDestCopyBits = uint32(DestCopyBits);
 			for (int i = 0; i < LoopCount; ++i)
 			{
-				const WordType Word = Src[i];
-				Dest[i] = WordType((Dest[i] & ~Mask) | WordType(Word << UDestBit));
-				Dest[i + 1] = WordType((Dest[i + 1] & Mask) | WordType(Word >> UDestCopyBits));
+				const WordType Word = LoadWordUnaligned(&Src[i]);
+				const WordType D0 = LoadWordUnaligned(&Dest[i]);
+				const WordType D1 = LoadWordUnaligned(&Dest[i + 1]);
+				StoreWordUnaligned(&Dest[i], WordType((D0 & ~Mask) | WordType(Word << UDestBit)));
+				StoreWordUnaligned(&Dest[i + 1], WordType((D1 & Mask) | WordType(Word >> UDestCopyBits)));
 			}
 		}
 		Src += LoopCount;
