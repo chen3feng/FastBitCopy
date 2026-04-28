@@ -14,7 +14,7 @@
  * Only supports little-endian platforms that allow unaligned loads.
  * (x64 and arm64 both qualify.)
  */
-void appBitsCpyFastImpl(uint8* Dest, int32 DestBit, uint8* Src, int32 SrcBit, int32 BitCount);
+FASTBITCOPY_API void appBitsCpyFastImpl(uint8 *Dest, int32 DestBit, uint8 *Src, int32 SrcBit, int32 BitCount);
 
 /** Copy of the original appBitsCpy, kept for benchmarking. */
-void OriginalAppBitsCpyForTest(uint8* Dest, int32 DestBit, uint8* Src, int32 SrcBit, int32 BitCount);
+FASTBITCOPY_API void OriginalAppBitsCpyForTest(uint8 *Dest, int32 DestBit, uint8 *Src, int32 SrcBit, int32 BitCount);

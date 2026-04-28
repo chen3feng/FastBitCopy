@@ -25,3 +25,9 @@ Thumbs.db
   
 # Agent scratch directory (local only, never committed)  
 .agent/  
+
+# Local environment overrides
+.env
+
+# TestHost plugin root junction/symlink (created by build scripts)
+TestHost/.plugin_root/

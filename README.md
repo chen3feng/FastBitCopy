@@ -63,18 +63,6 @@ and arm64 qualify.
 > deterministic edge cases. The speed-up figures in the table above were
 > measured on Windows (MSVC); absolute numbers on Linux/macOS will vary
 > with compiler and host CPU, but the implementation path is the same.
->
-> History note: issue
-> [#2](https://github.com/chen3feng/FastBitCopy/issues/2) tracked an
-> earlier `-O2` divergence on GCC/Clang that was resolved before the
-> standalone CI job became blocking. The root causes were a
-> dangling-reference bug in the CI shim's `FMath::Min`/`Max` (PR #6)
-> and an alignment-UB in `CopyBitsSrcAligned` (PR #7). All three
-> defensive compile-time barriers that were added as workarounds
-> (`FASTBITCOPY_SAFE_OPT`, `FASTBITCOPY_NOINLINE`, and the inline-asm
-> `"memory"` compiler barrier) have since been removed (PRs #9, #10,
-> #11) with CI remaining green at each step, confirming the fixes
-> addressed the true root causes.
 
 ## Installation
 
@@ -115,12 +103,39 @@ Download the repo as a zip, extract, rename the top-level folder to
 Then regenerate project files and rebuild — that's it. The hook installs
 itself during engine initialization; there are no APIs to call.
 
+## Building & testing locally (with a real UE source build)
+
+The repository includes convenience scripts for building the `TestHost`
+project against a local Unreal Engine source checkout:
+
+```bash
+# Windows
+build_testhost.bat              # Editor (Development)
+build_testhost.bat Game         # Game client (Development)
+build_testhost.bat test         # Build Editor + run automation tests
+
+# Linux / macOS
+./build_testhost.sh             # Editor (Development)
+./build_testhost.sh Game        # Game client (Development)
+./build_testhost.sh test        # Build Editor + run automation tests
+```
+
+By default the scripts look for `../UnrealEngine` (a sibling directory).
+To override, create a `.env` file in the repo root (see `.env.example`):
+
+```
+ENGINE_ROOT=E:\UnrealEngine
+```
+
 Repository layout:
 
 ```
 FastBitCopy/
 ├── FastBitCopy.uplugin
 ├── README.md / README_CN.md
+├── build_testhost.bat            # Windows build/test script
+├── build_testhost.sh             # Linux/macOS build/test script
+├── .env.example                  # ENGINE_ROOT configuration template
 ├── Source/
 │   ├── FastBitCopy/              # runtime module (installs the hook)
 │   │   ├── FastBitCopy.Build.cs
@@ -137,6 +152,10 @@ FastBitCopy/
 │       └── Private/
 │           ├── FastBitCopyTestsModule.cpp
 │           └── FastBitCopyTests.cpp
+├── CI/                           # standalone CI harness (no UE required)
+│   ├── CMakeLists.txt
+│   ├── test_main.cpp
+│   └── ue_shim.h
 └── TestHost/                     # optional standalone test project
     ├── FastBitCopyHost.uproject  # uses AdditionalPluginDirectories: [".."]
     └── Source/FastBitCopyHost/

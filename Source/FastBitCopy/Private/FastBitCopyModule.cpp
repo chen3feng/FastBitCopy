@@ -16,13 +16,13 @@ DEFINE_LOG_CATEGORY_STATIC(LogFastBitCopy, Log, All);
 CORE_API void appBitsCpy(uint8* Dest, int32 DestBit, uint8* Src, int32 SrcBit, int32 BitCount);
 
 // Build-path self-identification probe, defined in BitCopyFast.cpp. Returns 1
-// iff that translation unit compiled the real optimized path, 0 if it
-// compiled the fallback-to-stock path. The latter happens on any compiler
-// where we have not yet validated the optimized code (currently: everything
-// except MSVC, see issue #2). Installing the hook in the fallback case would
-// create an infinite recursion (HookedAppBitsCpy -> appBitsCpyFastImpl ->
-// appBitsCpy -> HookedAppBitsCpy -> ...), so we must gate off of it.
-CORE_API int FastBitCopy_IsOptimizedBuild();
+// iff that translation unit compiled the real optimized path (the
+// PLATFORM_LITTLE_ENDIAN && PLATFORM_SUPPORTS_UNALIGNED_LOADS branch), 0 if
+// it compiled the fallback-to-stock path. Installing the hook in the fallback
+// case would create an infinite recursion (HookedAppBitsCpy ->
+// appBitsCpyFastImpl -> appBitsCpy -> HookedAppBitsCpy -> ...), so we gate
+// on this probe.
+int FastBitCopy_IsOptimizedBuild();
 
 namespace
 {
@@ -45,8 +45,7 @@ void FFastBitCopyModule::StartupModule()
 		// is just a thunk to appBitsCpy). Installing the hook here would
 		// turn that thunk into an infinite self-call. Skip.
 		UE_LOG(LogFastBitCopy, Log,
-			   TEXT("FastBitCopy: compiled in fallback mode on this toolchain; skipping hook. ")
-				   TEXT("(see issue #2 for the MSVC-vs-GCC/Clang investigation)"));
+			   TEXT("FastBitCopy: compiled in fallback mode (platform does not meet requirements); skipping hook."));
 		return;
 	}
 

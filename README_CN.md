@@ -63,16 +63,6 @@ UE 自带的 `appBitsCpy` 是逐字节处理的标量实现。在 x86-64 与 arm
 > 确定性边界用例。上面表中的加速比是在 Windows (MSVC) 上测得，
 > Linux/macOS 上的绝对数字会随编译器和宿主 CPU 不同而变化，但走的
 > 是同一条优化实现路径。
->
-> 历史记录：Issue
-> [#2](https://github.com/chen3feng/FastBitCopy/issues/2) 跟踪过早期
-> GCC/Clang `-O2` 下位不对齐路径与引用实现不一致的问题，在
-> standalone CI job 转为阻塞门禁之前已得到解决。根本原因是 CI shim
-> 中 `FMath::Min`/`Max` 的悬垂引用（PR #6）以及 `CopyBitsSrcAligned`
-> 中的对齐 UB（PR #7）。作为临时方案添加的三道防御性编译时屏障
-> （`FASTBITCOPY_SAFE_OPT`、`FASTBITCOPY_NOINLINE`、内联汇编
-> `"memory"` 编译器屏障）已全部移除（PR #9、#10、#11），每一步 CI
-> 均保持全绿，确认修复针对的是真正的根因。
 
 ## 安装
 
@@ -113,12 +103,38 @@ git subtree pull --prefix=Plugins/FastBitCopy \
 然后重新生成工程文件、重新编译。Hook 会在引擎初始化阶段自动安装，
 无需调用任何 API。
 
+## 本地构建与测试（使用真实 UE 源码构建）
+
+仓库自带便捷脚本，可直接用本地 UE 源码构建 `TestHost` 工程：
+
+```bash
+# Windows
+build_testhost.bat              # Editor（Development）
+build_testhost.bat Game         # Game 客户端（Development）
+build_testhost.bat test         # 编译 Editor + 运行自动化测试
+
+# Linux / macOS
+./build_testhost.sh             # Editor（Development）
+./build_testhost.sh Game        # Game 客户端（Development）
+./build_testhost.sh test        # 编译 Editor + 运行自动化测试
+```
+
+脚本默认查找 `../UnrealEngine`（同级目录）。如需自定义，在仓库根目录
+创建 `.env` 文件（参考 `.env.example`）：
+
+```
+ENGINE_ROOT=E:\UnrealEngine
+```
+
 仓库目录结构：
 
 ```
 FastBitCopy/
 ├── FastBitCopy.uplugin
 ├── README.md / README_CN.md
+├── build_testhost.bat            # Windows 构建/测试脚本
+├── build_testhost.sh             # Linux/macOS 构建/测试脚本
+├── .env.example                  # ENGINE_ROOT 配置模板
 ├── Source/
 │   ├── FastBitCopy/              # 运行时模块（安装 Hook）
 │   │   ├── FastBitCopy.Build.cs
@@ -135,6 +151,10 @@ FastBitCopy/
 │       └── Private/
 │           ├── FastBitCopyTestsModule.cpp
 │           └── FastBitCopyTests.cpp
+├── CI/                           # 独立 CI 测试（无需 UE）
+│   ├── CMakeLists.txt
+│   ├── test_main.cpp
+│   └── ue_shim.h
 └── TestHost/                     # 可选的独立测试宿主工程
     ├── FastBitCopyHost.uproject  # 通过 AdditionalPluginDirectories: [".."] 加载
     └── Source/FastBitCopyHost/

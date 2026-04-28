@@ -41,6 +41,10 @@ using int64  = std::int64_t;
 #define CORE_API
 #endif
 
+#ifndef FASTBITCOPY_API
+#define FASTBITCOPY_API
+#endif
+
 // ---- CoreMinimal.h / Math / Memory shims ----
 // BitCopyFast.cpp includes "CoreMinimal.h" and "Math/UnrealMathUtility.h";
 // we provide empty headers under CI/compat/ so the #includes resolve.

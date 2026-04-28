@@ -14,7 +14,7 @@
  *
  * On shutdown, the hook is reverted so Core is left in a clean state.
  */
-class FFastBitCopyModule : public IModuleInterface
+class FASTBITCOPY_API FFastBitCopyModule : public IModuleInterface
 {
 public:
 	// IModuleInterface
