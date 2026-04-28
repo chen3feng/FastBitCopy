@@ -153,7 +153,7 @@ print_summary() {
 
 # ---- Parse arguments ----
 MODE="${1:-all}"
-MODE="${MODE,,}"  # lowercase
+MODE="$(echo "${MODE}" | tr '[:upper:]' '[:lower:]')"  # lowercase
 
 case "${MODE}" in
     all)

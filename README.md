@@ -1,8 +1,11 @@
 # FastBitCopy — Unreal Engine plugin
 
 [![CI](https://github.com/chen3feng/FastBitCopy/actions/workflows/ci.yml/badge.svg)](https://github.com/chen3feng/FastBitCopy/actions/workflows/ci.yml)
+[![UE Plugin](https://img.shields.io/badge/Unreal%20Engine-Plugin-blue?logo=unrealengine&logoColor=white)](https://www.unrealengine.com/marketplace)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 [English](README.md) | [中文](README_CN.md)
+
 **FastBitCopy** replaces UE's `appBitsCpy` (the bit-copy routine used by
 `FBitReader` / `FBitWriter`, replication, networking, serialization, …) with
 a drop-in optimized implementation **at runtime**, via a cross-platform

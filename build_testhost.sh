@@ -89,7 +89,9 @@ run_build() {
         -project="${PROJECT}"
 }
 
-if [[ "${TARGET_TYPE,,}" == "test" ]]; then
+TARGET_TYPE_LOWER="$(echo "${TARGET_TYPE}" | tr '[:upper:]' '[:lower:]')"
+
+if [[ "${TARGET_TYPE_LOWER}" == "test" ]]; then
     # ---- Build Editor first ----
     echo ""
     echo "=== Step 1/2: Building Editor target ==="
@@ -124,9 +126,9 @@ if [[ "${TARGET_TYPE,,}" == "test" ]]; then
 fi
 
 # ---- Normal build ----
-if [[ "${TARGET_TYPE,,}" == "editor" ]]; then
+if [[ "${TARGET_TYPE_LOWER}" == "editor" ]]; then
     TARGET_NAME="FastBitCopyHostEditor"
-elif [[ "${TARGET_TYPE,,}" == "game" ]]; then
+elif [[ "${TARGET_TYPE_LOWER}" == "game" ]]; then
     TARGET_NAME="FastBitCopyHost"
 else
     echo "ERROR: Unknown target type: ${TARGET_TYPE}"
