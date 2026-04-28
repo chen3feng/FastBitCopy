@@ -120,6 +120,22 @@ build_testhost.bat test         # Build Editor + run automation tests
 ./build_testhost.sh test        # Build Editor + run automation tests
 ```
 
+Dedicated test scripts that cover both link modes:
+
+```bash
+# Windows
+test_testhost.bat               # Full suite: Editor build+test, Game build
+test_testhost.bat editor        # Editor only: build + automation tests
+test_testhost.bat game          # Game only: build (static link verification)
+test_testhost.bat --no-build    # Skip build, run Editor tests only
+
+# Linux / macOS
+./test_testhost.sh              # Full suite: Editor build+test, Game build
+./test_testhost.sh editor       # Editor only: build + automation tests
+./test_testhost.sh game         # Game only: build (static link verification)
+./test_testhost.sh --no-build   # Skip build, run Editor tests only
+```
+
 By default the scripts look for `../UnrealEngine` (a sibling directory).
 To override, create a `.env` file in the repo root (see `.env.example`):
 
@@ -133,8 +149,10 @@ Repository layout:
 FastBitCopy/
 ├── FastBitCopy.uplugin
 ├── README.md / README_CN.md
-├── build_testhost.bat            # Windows build/test script
-├── build_testhost.sh             # Linux/macOS build/test script
+├── build_testhost.bat            # Windows build script
+├── build_testhost.sh             # Linux/macOS build script
+├── test_testhost.bat             # Windows test script (Editor + Game)
+├── test_testhost.sh              # Linux/macOS test script (Editor + Game)
 ├── .env.example                  # ENGINE_ROOT configuration template
 ├── Source/
 │   ├── FastBitCopy/              # runtime module (installs the hook)
