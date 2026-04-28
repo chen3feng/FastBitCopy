@@ -75,8 +75,9 @@ entirely; the module loads but does nothing (no hook, no overhead).
 > deterministic edge cases. The speed-up figures in the table above were
 > measured on Windows (MSVC); absolute numbers on Linux/macOS will vary
 > with compiler and host CPU, but the implementation path is the same.
-> Android has not been verified on a real device yet, but the code path is
-> identical to Linux arm64.
+> Android arm64 is cross-compiled with the NDK and executed via QEMU
+> user-mode emulation in CI, verifying algorithm correctness on the
+> actual target ABI.
 
 ## Installation
 

@@ -3,7 +3,7 @@
 	"Version": 1,
 	"VersionName": "1.0.0",
 	"FriendlyName": "Fast Bit Copy",
-	"Description": "Runtime hook of UE's appBitsCpy with an optimized implementation (up to ~30x faster on aligned copy, ~5x on unaligned). Supports Win/Linux/Mac on x64 and arm64.",
+	"Description": "Runtime hook of UE's appBitsCpy with an optimized implementation (up to ~30x faster on aligned copy, ~5x on unaligned). Supports Win/Linux/Mac/Android on x64 and arm64.",
 	"Category": "Performance",
 	"CreatedBy": "chen3feng",
 	"CreatedByURL": "https://github.com/chen3feng/FastBitCopy",
@@ -19,13 +19,23 @@
 			"Name": "FastBitCopy",
 			"Type": "Runtime",
 			"LoadingPhase": "PostConfigInit",
-			"PlatformAllowList": [ "Win64", "Linux", "Mac" ]
+			"PlatformAllowList": [
+				"Win64",
+				"Linux",
+				"Mac",
+				"Android"
+			]
 		},
 		{
 			"Name": "FastBitCopyTests",
 			"Type": "DeveloperTool",
 			"LoadingPhase": "Default",
-			"PlatformAllowList": [ "Win64", "Linux", "Mac" ]
+			"PlatformAllowList": [
+				"Win64",
+				"Linux",
+				"Mac",
+				"Android"
+			]
 		}
 	]
 }

@@ -73,8 +73,8 @@ UE 自带的 `appBitsCpy` 是逐字节处理的标量实现。在 x86-64 与 arm
 > 专项，每项都覆盖 10 000 组随机 `(SrcBit, DstBit, BitCount)` 正确性
 > 测试和页边界 / 确定性边界用例。上面表中的加速比是在 Windows (MSVC)
 > 上测得，Linux/macOS 上的绝对数字会随编译器和宿主 CPU 不同而变化，
-> 但走的是同一条优化实现路径。Android 尚未实机验证，但代码路径与
-> Linux arm64 完全一致。
+> 但走的是同一条优化实现路径。Android arm64 通过 NDK 交叉编译并在 CI
+> 中以 QEMU 用户态模拟执行，验证了目标 ABI 上的算法正确性。
 
 ## 安装
 
