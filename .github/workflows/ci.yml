@@ -169,12 +169,13 @@ jobs:
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-24 \
             -DANDROID_STL=c++_static \
-            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_EXE_LINKER_FLAGS="-static"
 
       - name: Build
         run: cmake --build CI/build-android --config Release -j
 
       - name: Run via QEMU
         run: |
-          # The NDK-built binary is a static PIE; QEMU can run it directly.
+          # Statically linked; QEMU can run it without Android's linker64.
           qemu-aarch64 CI/build-android/fastbitcopy_ci
