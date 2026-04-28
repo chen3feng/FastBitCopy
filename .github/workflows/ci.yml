@@ -65,10 +65,11 @@ jobs:
       - name: Run correctness + micro-benchmark
         run: ctest --test-dir CI/build --output-on-failure -C Release
 
-  # Known issue: on GCC/Clang -O2 the algorithm produces results that
-  # diverge from the reference implementation. Until that is resolved,
-  # also run an -O0 sweep on Linux/macOS so CI can still detect
-  # regressions in the algorithm's overall logic.
+  # The GCC/Clang -O2 divergence tracked in issue #2 was resolved by
+  # PR #6 (FMath::Min dangling-ref) and PR #7 (alignment UB). The -O0
+  # sweep is kept as an extra safety net: if a future change introduces
+  # a new optimiser-sensitive bug, the -O0 job will stay green and help
+  # narrow the root cause.
   standalone-test-debug:
     name: Standalone test -O0 (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
