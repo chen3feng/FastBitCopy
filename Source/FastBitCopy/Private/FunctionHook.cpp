@@ -490,7 +490,6 @@ namespace FastBitCopyHookPrivate
 			return 0; // unsupported — caller will bail out
 		}
 	}
-#endif // PLATFORM_CPU_X86_FAMILY
 
 	// -----------------------------------------------------------------------
 	// x86_64 trampoline relocation
