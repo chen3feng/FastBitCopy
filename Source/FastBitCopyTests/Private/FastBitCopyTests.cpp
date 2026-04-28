@@ -9,8 +9,8 @@
 //   * Speed benchmark: compares Original vs Fast across various sizes.
 
 #include "CoreMinimal.h"
-#include "BitCopyFast.h"
 #include "FastBitCopy.h"
+#include "FastBitCopyModule.h"
 
 #include "Misc/AutomationTest.h"
 #include "Misc/MemStack.h"
@@ -67,8 +67,8 @@ bool FFastBitCopyCorrectness::RunTest(const FString& Parameters)
 		uint8 DstFast[TestBytes] = { 0 };
 		uint8 DstRef [TestBytes] = { 0 };
 
-		appBitsCpyFastImpl      (DstFast, DstBit, Src, SrcBit, BitCount);
-		OriginalAppBitsCpyForTest(DstRef , DstBit, Src, SrcBit, BitCount);
+		FastBitCopy(DstFast, DstBit, Src, SrcBit, BitCount);
+		OriginalAppBitsCpy(DstRef, DstBit, Src, SrcBit, BitCount);
 
 		if (FMemory::Memcmp(DstFast, DstRef, TestBytes) != 0)
 		{
@@ -104,7 +104,7 @@ bool FFastBitCopyHookSanity::RunTest(const FString& Parameters)
 	const int DstBit = 17, SrcBit = 5, BitCount = TestBytes*8 - 100;
 
 	appBitsCpy         (A, DstBit, Src, SrcBit, BitCount); // hooked
-	appBitsCpyFastImpl (B, DstBit, Src, SrcBit, BitCount); // direct
+	FastBitCopy(B, DstBit, Src, SrcBit, BitCount);		   // direct
 
 	UTEST_EQUAL("Hooked appBitsCpy matches fast impl",
 		FMemory::Memcmp(A, B, TestBytes), 0);
@@ -124,8 +124,8 @@ bool FFastBitCopyPageBound::RunTest(const FString& Parameters)
 	uint8* Dst = (uint8*)FPageAllocator::Get().Alloc();
 	FMemory::Memset(Src, 0xFF, PageSize);
 
-	appBitsCpyFastImpl(Dst, 9,     Src, 10,  PageSize * 8 - 10);
-	appBitsCpyFastImpl(Dst, 23890, Src, 464, 8839);
+	FastBitCopy(Dst, 9, Src, 10, PageSize * 8 - 10);
+	FastBitCopy(Dst, 23890, Src, 464, 8839);
 
 	const int TestBits = PageSize * 8;
 	for (int i = 0; i < 10000; ++i)
@@ -133,7 +133,7 @@ bool FFastBitCopyPageBound::RunTest(const FString& Parameters)
 		int DstBit   = rand() % TestBits;
 		int SrcBit   = rand() % (TestBits - DstBit);
 		int BitCount = rand() % (TestBits - FMath::Max(DstBit, SrcBit));
-		appBitsCpyFastImpl(Dst, DstBit, Src, SrcBit, BitCount);
+		FastBitCopy(Dst, DstBit, Src, SrcBit, BitCount);
 	}
 
 	FPageAllocator::Get().Free(Src);
@@ -166,8 +166,10 @@ static double BenchOne(int LoopCount)
 	{
 		if constexpr (Type == Original)
 		{
-			if (IsAligned) OriginalAppBitsCpyForTest(Dest, 0, Src, 0, Bits);
-			else           OriginalAppBitsCpyForTest(Dest, 0, Src, 1, Bits - 1);
+			if (IsAligned)
+				OriginalAppBitsCpy(Dest, 0, Src, 0, Bits);
+			else
+				OriginalAppBitsCpy(Dest, 0, Src, 1, Bits - 1);
 		}
 		else if constexpr (Type == Hooked)
 		{
@@ -176,8 +178,10 @@ static double BenchOne(int LoopCount)
 		}
 		else
 		{
-			if (IsAligned) appBitsCpyFastImpl(Dest, 0, Src, 0, Bits);
-			else           appBitsCpyFastImpl(Dest, 0, Src, 1, Bits - 1);
+			if (IsAligned)
+				FastBitCopy(Dest, 0, Src, 0, Bits);
+			else
+				FastBitCopy(Dest, 0, Src, 1, Bits - 1);
 		}
 	}
 	const double Elapsed = FPlatformTime::Seconds() - StartTime;

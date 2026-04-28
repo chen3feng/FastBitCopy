@@ -14,7 +14,7 @@ UE's stock `appBitsCpy` is a scalar byte-at-a-time implementation. On both
 x86-64 and arm64 we can do much better with aligned 64-bit loads/stores plus
 `memcpy` for middle bytes:
 
-| Copy type   | Stock `appBitsCpy` | `appBitsCpyFastImpl` | Speed-up |
+| Copy type   | Stock `appBitsCpy` | `FastBitCopy` | Speed-up |
 |-------------|-------------------:|---------------------:|---------:|
 | Aligned     | 1743817 ns (1 MiB) |             60595 ns |   ~30×   |
 | Unaligned   | 1776341 ns (1 MiB) |            325179 ns |    ~5×   |
@@ -173,11 +173,11 @@ FastBitCopy/
 │   ├── FastBitCopy/              # runtime module (installs the hook)
 │   │   ├── FastBitCopy.Build.cs
 │   │   ├── Public/
-│   │   │   ├── FastBitCopy.h
-│   │   │   └── BitCopyFast.h
+│   │   │   ├── FastBitCopyModule.h
+│   │   │   └── FastBitCopy.h
 │   │   └── Private/
 │   │       ├── FastBitCopyModule.cpp
-│   │       ├── BitCopyFast.cpp
+│   │       ├── FastBitCopy.cpp
 │   │       ├── FunctionHook.h
 │   │       └── FunctionHook.cpp
 │   └── FastBitCopyTests/         # developer-tool test module
@@ -208,7 +208,7 @@ and run:
 
 | Test                      | Purpose                                          |
 |---------------------------|--------------------------------------------------|
-| `FastBitCopy.HookSanity`  | Asserts the hook is installed and that the exported `appBitsCpy` now produces the same output as `appBitsCpyFastImpl`. |
+| `FastBitCopy.HookSanity`  | Asserts the hook is installed and that the exported `appBitsCpy` now produces the same output as `FastBitCopy`. |
 | `FastBitCopy.Correctness` | Compares the fast implementation against a verbatim copy of the original across 10 000 random `(SrcBit, DstBit, BitCount)` triples. |
 | `FastBitCopy.PageBound`   | Exercises the unaligned-64-bit-load path across real OS page boundaries. |
 | `FastBitCopy.Speed`       | Benchmarks Original vs Hooked vs Direct-Fast across sizes 1 B – 1 KiB. |
@@ -225,17 +225,17 @@ The plugin also exposes the optimized primitive directly, so you can call
 it even in places that don't go through `appBitsCpy`:
 
 ```cpp
-#include "BitCopyFast.h"
+#include "FastBitCopy.h"
 
-void appBitsCpyFastImpl(uint8* Dest, int32 DestBit,
-                        uint8* Src,  int32 SrcBit,
-                        int32 BitCount);
+void FastBitCopy(uint8* Dest, int32 DestBit,
+                uint8* Src,  int32 SrcBit,
+                int32 BitCount);
 ```
 
 And a query for the hook state:
 
 ```cpp
-#include "FastBitCopy.h"
+#include "FastBitCopyModule.h"
 
 if (FFastBitCopyModule::IsHookInstalled()) { /* ... */ }
 ```
@@ -250,7 +250,7 @@ if (FFastBitCopyModule::IsHookInstalled()) { /* ... */ }
   without the speed-up.
 * The trampoline is only used for benchmarking / debugging; everyday
   replication callers go straight through the patched `appBitsCpy` to
-  `appBitsCpyFastImpl` with a single extra `jmp` of overhead.
+`FastBitCopy` with a single extra `jmp` of overhead.
 
 ## License
 

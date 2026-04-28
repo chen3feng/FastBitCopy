@@ -1,6 +1,6 @@
 // Copyright (c) chen3feng. All Rights Reserved.
 //
-// Minimal UE-compat shim that lets BitCopyFast.cpp compile outside of UE.
+// Minimal UE-compat shim that lets FastBitCopy.cpp compile outside of UE.
 // It is ONLY used by the standalone CI build in CI/CMakeLists.txt, never
 // by the real plugin build done through UBT.
 
@@ -43,7 +43,7 @@ using int64  = std::int64_t;
 #endif
 
 // ---- CoreMinimal.h / Math / Memory shims ----
-// BitCopyFast.cpp includes "CoreMinimal.h" and "Math/UnrealMathUtility.h";
+// FastBitCopy.cpp includes "CoreMinimal.h" and "Math/UnrealMathUtility.h";
 // we provide empty headers under CI/compat/ so the #includes resolve.
 // The real symbols it needs are FMath and FMemory, shimmed below.
 

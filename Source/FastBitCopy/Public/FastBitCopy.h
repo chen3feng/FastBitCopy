@@ -3,24 +3,17 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Modules/ModuleInterface.h"
 
 /**
- * FastBitCopy module.
+ * Same signature as UE's CORE_API `appBitsCpy`.
  *
- * On startup, this module hooks UE's CORE_API `appBitsCpy` with our optimized
- * implementation so that all existing callers (FBitReader / FBitWriter, network
- * serialization, replication, etc.) transparently get the speed-up.
+ * Copies `BitCount` bits from `Src` (starting at bit `SrcBit`) to `Dest`
+ * (starting at bit `DestBit`). This is a drop-in, much faster replacement
+ * for UE's implementation.
  *
- * On shutdown, the hook is reverted so Core is left in a clean state.
+ * Only supports little-endian platforms (x64, arm64, etc.).
  */
-class FASTBITCOPY_API FFastBitCopyModule : public IModuleInterface
-{
-public:
-	// IModuleInterface
-	virtual void StartupModule() override;
-	virtual void ShutdownModule() override;
+FASTBITCOPY_API void FastBitCopy(uint8 *Dest, int32 DestBit, uint8 *Src, int32 SrcBit, int32 BitCount);
 
-	/** Returns true if the appBitsCpy hook is currently installed. */
-	static bool IsHookInstalled();
-};
+/** Copy of the original appBitsCpy, kept for benchmarking. */
+FASTBITCOPY_API void OriginalAppBitsCpy(uint8 *Dest, int32 DestBit, uint8 *Src, int32 SrcBit, int32 BitCount);

@@ -1,7 +1,7 @@
 // Copyright (c) chen3feng. All Rights Reserved.
 
+#include "FastBitCopyModule.h"
 #include "FastBitCopy.h"
-#include "BitCopyFast.h"
 #include "FunctionHook.h"
 
 #include "Modules/ModuleManager.h"
@@ -15,11 +15,11 @@ DEFINE_LOG_CATEGORY_STATIC(LogFastBitCopy, Log, All);
 // with CORE_API here guarantees we link to the same exported symbol.
 CORE_API void appBitsCpy(uint8* Dest, int32 DestBit, uint8* Src, int32 SrcBit, int32 BitCount);
 
-// Build-path self-identification probe, defined in BitCopyFast.cpp. Returns 1
+// Build-path self-identification probe, defined in FastBitCopy.cpp. Returns 1
 // iff that translation unit compiled the real optimized path (the
 // PLATFORM_LITTLE_ENDIAN branch), 0 if it compiled the fallback-to-stock
 // path. Installing the hook in the fallback case would create an infinite
-// recursion (HookedAppBitsCpy -> appBitsCpyFastImpl -> appBitsCpy ->
+// recursion (HookedAppBitsCpy -> FastBitCopy -> appBitsCpy ->
 // HookedAppBitsCpy -> ...), so we gate on this probe.
 int FastBitCopy_IsOptimizedBuild();
 
@@ -31,7 +31,7 @@ namespace
 	// Hook detour: forward to our fast implementation.
 	static void HookedAppBitsCpy(uint8* Dest, int32 DestBit, uint8* Src, int32 SrcBit, int32 BitCount)
 	{
-		appBitsCpyFastImpl(Dest, DestBit, Src, SrcBit, BitCount);
+		FastBitCopy(Dest, DestBit, Src, SrcBit, BitCount);
 	}
 }
 
@@ -46,7 +46,7 @@ void FFastBitCopyModule::StartupModule()
 #else
 	if (FastBitCopy_IsOptimizedBuild() == 0)
 	{
-		// BitCopyFast.cpp compiled the fallback path (appBitsCpyFastImpl
+		// FastBitCopy.cpp compiled the fallback path (FastBitCopy
 		// is just a thunk to appBitsCpy). Installing the hook here would
 		// turn that thunk into an infinite self-call. Skip.
 		UE_LOG(LogFastBitCopy, Log,
@@ -67,7 +67,7 @@ void FFastBitCopyModule::StartupModule()
 	GBitsCpyHookInstalled = bOK;
 	if (bOK)
 	{
-		UE_LOG(LogFastBitCopy, Log, TEXT("Installed runtime hook for appBitsCpy -> appBitsCpyFastImpl."));
+		UE_LOG(LogFastBitCopy, Log, TEXT("Installed runtime hook for appBitsCpy -> FastBitCopy."));
 	}
 	else
 	{
