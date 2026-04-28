@@ -39,27 +39,18 @@
 #define FASTBITCOPY_NOINLINE
 #endif
 
-// Per-function optimization override. On GCC/Clang at -O2 we have observed
-// miscompilations in this translation unit (uninitialised-stack-slot loads
-// in the generated assembly; see #2). Compile the hot helpers at -O0
-// (which we *know* produces correct code from the -O0 CI jobs), while the
-// rest of the translation unit stays at the project-level -O2. The inner
-// loops are still a single memcpy in the aligned case; the unaligned
-// case loses some of its vectorisation but the rest of this TU (the
-// Original* reference and the hook plumbing) can still be optimized
-// normally.
-#if defined(__clang__)
-#define FASTBITCOPY_SAFE_OPT __attribute__((optnone))
-#elif defined(__GNUC__)
-#define FASTBITCOPY_SAFE_OPT __attribute__((optimize("O0")))
-#else
-#define FASTBITCOPY_SAFE_OPT
-#endif
+// FASTBITCOPY_SAFE_OPT was a per-function optimization override that
+// compiled the hot helpers at -O0 on GCC/Clang to work around a
+// miscompilation observed in issue #2. The root cause turned out to be
+// a dangling-reference bug in the CI shim's FMath::Min/Max (fixed in
+// PR #6) and an alignment-UB in CopyBitsSrcAligned (fixed in PR #7),
+// not a compiler bug. Removed: all functions now compile at the
+// project-level optimization (-O2 in Release).
 
 #if PLATFORM_LITTLE_ENDIAN && PLATFORM_SUPPORTS_UNALIGNED_LOADS
 
 // Copy bits when BitOffset of Src and Dest are same.
-static FASTBITCOPY_NOINLINE FASTBITCOPY_SAFE_OPT void BitsCopyFastAligned(uint8 *Dest, uint8 *Src, int BitOffset, int BitCount)
+static FASTBITCOPY_NOINLINE void BitsCopyFastAligned(uint8 *Dest, uint8 *Src, int BitOffset, int BitCount)
 {
 	// Copy leading bits: Align to byte boundary
 	if (BitOffset != 0)
@@ -126,7 +117,7 @@ static FORCEINLINE void StoreWordUnaligned(WordType *P, WordType W)
 
 // Copy bits with source bit offset aligned.
 template <typename WordType>
-static FASTBITCOPY_NOINLINE FASTBITCOPY_SAFE_OPT void CopyBitsSrcAligned(WordType *Dest, int DestBit, WordType *Src, int BitCount)
+static FASTBITCOPY_NOINLINE void CopyBitsSrcAligned(WordType *Dest, int DestBit, WordType *Src, int BitCount)
 {
 	// Handle middle words
 	const int BitsPerWord = sizeof(WordType) * 8;
@@ -206,7 +197,7 @@ static FASTBITCOPY_NOINLINE FASTBITCOPY_SAFE_OPT void CopyBitsSrcAligned(WordTyp
 	}
 }
 
-static FASTBITCOPY_NOINLINE FASTBITCOPY_SAFE_OPT void BitsCopyFastUnaligned(uint8 *Dest, int DestBit, uint8 *Src, int SrcBit, int BitCount)
+static FASTBITCOPY_NOINLINE void BitsCopyFastUnaligned(uint8 *Dest, int DestBit, uint8 *Src, int SrcBit, int BitCount)
 {
 	// Align SrcBit to 0
 	if (SrcBit != 0)
@@ -368,7 +359,7 @@ void OriginalAppBitsCpyForTest(uint8* Dest, int32 DestBit, uint8* Src, int32 Src
 }
 
 // Our optimized bit copy entry point.
-FASTBITCOPY_NOINLINE FASTBITCOPY_SAFE_OPT void appBitsCpyFastImpl(uint8 *Dest, int32 DestBit, uint8 *Src, int32 SrcBit, int32 BitCount)
+FASTBITCOPY_NOINLINE void appBitsCpyFastImpl(uint8 *Dest, int32 DestBit, uint8 *Src, int32 SrcBit, int32 BitCount)
 {
 	// Align to byte bound.
 	Dest += DestBit / 8;

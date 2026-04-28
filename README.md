@@ -67,11 +67,13 @@ and arm64 qualify.
 > History note: issue
 > [#2](https://github.com/chen3feng/FastBitCopy/issues/2) tracked an
 > earlier `-O2` divergence on GCC/Clang that was resolved before the
-> standalone CI job became blocking. The current GCC/Clang build carries
-> a small set of defensive compile-time barriers (`FASTBITCOPY_NOINLINE`,
-> an inline-asm `"memory"` barrier, and an `optnone` wrapper around the
-> unaligned bulk copy) which we plan to peel back one at a time in
-> follow-up PRs, re-verifying CI at each step.
+> standalone CI job became blocking. The root causes were a
+> dangling-reference bug in the CI shim's `FMath::Min`/`Max` (PR #6)
+> and an alignment-UB in `CopyBitsSrcAligned` (PR #7). The per-function
+> `optnone`/`optimize("O0")` override (`FASTBITCOPY_SAFE_OPT`) has been
+> removed; two lighter defensive barriers remain (`FASTBITCOPY_NOINLINE`
+> and an inline-asm `"memory"` compiler barrier) and will be peeled back
+> in follow-up PRs, re-verifying CI at each step.
 
 ## Installation
 
