@@ -324,29 +324,72 @@ void OriginalAppBitsCpy(uint8 *Dest, int32 DestBit, uint8 *Src, int32 SrcBit, in
 	OriginalAppBitsCpyImpl(Dest, DestBit, Src, SrcBit, BitCount);
 }
 
-// Small-size shortcut threshold (in bits).
+// Small-size shortcut thresholds (in bits), split by alignment class.
 //
-// Empirically the optimized path only beats the original at roughly >= 64 bits
-// (8 bytes) of payload. Below that, fixed per-call overhead (byte-align head,
-// FMemory::Memcpy tail, and in the unaligned case the CopyBitsSrcAligned<uint64>
-// setup) dominates, while the original appBitsCpy has a tight branch-free
-// short path for BitCount <= 8 and a lean shift loop for slightly larger sizes.
+// Empirically the two fast paths have very different crossover points.
+// All numbers below are ns/op from the CI threshold sweep on WSL2
+// Ubuntu 22.04 / g++ 13.3 / -O2 / 64-core box, after the bench-harness
+// DCE hardening (PR #23). Gated_ns is "Fast path if BitCount > thresh,
+// else Original".
 //
-// For BitCount <= FASTBITCOPY_SMALL_BITS we therefore forward to the original
-// implementation (inlined here -- OriginalAppBitsCpyImpl is FORCEINLINE) so
-// that FastBitCopy is never slower than the stock routine.
-#ifndef FASTBITCOPY_SMALL_BITS
-#define FASTBITCOPY_SMALL_BITS 64
+//     Aligned path (SrcBit == DestBit, i.e. (SrcBit - DestBit) % 8 == 0)
+//         Bits: 15 16 31 32 47 63 127 255 511 1023 2047
+//         Orig: 5.4 5.9 6.4 7.6 7.9 8.7 15.4 24.1 41.8  82.8 154.9
+//         Fast: 4.7 5.2 4.7 4.7 4.5 4.4  5.2  4.5  4.1   6.6   6.1
+//       Crossover (Fast <= Orig): ~15 bits. Fast wins for anything
+//       beyond one byte. A small safety margin gives us 32 bits, which
+//       still leaves FastBitCopy ~2x faster at 33-bit payloads vs. the
+//       original.
+//
+//     Unaligned path ((SrcBit - DestBit) % 8 != 0)
+//         Bits:  63  127 255 383 511 767 1023 2047
+//         Orig:  8.6 12.8 21.5 31.6 41.6 61.2 81.6 158.4
+//         Fast: 12.4 20.7 24.1 26.2 27.9 32.7 36.1  50.5
+//       Crossover (Fast <= Orig): ~320 bits. Before that, the fast
+//       path's per-call setup (leading-bit head, uint64 shift-word
+//       loop, tail byte fixup) loses to the original's tight shift
+//       accumulator. We pick 256 as the threshold so that 257-bit
+//       payloads take the Original path (where Orig is still slightly
+//       faster at ~21.5 vs 24.1 ns) but 385-bit payloads (and the bulk
+//       of UE Bunches, which are typically hundreds of bytes) go to
+//       the fast path where we're already ~20% faster and the gap
+//       grows to ~3x at 2 kbit.
+//
+// The thresholds are independently overridable; defining the legacy
+// FASTBITCOPY_SMALL_BITS on the command line still works and applies
+// to both paths (back-compat for any out-of-tree tuning).
+#ifdef FASTBITCOPY_SMALL_BITS
+#ifndef FASTBITCOPY_SMALL_BITS_ALIGNED
+#define FASTBITCOPY_SMALL_BITS_ALIGNED FASTBITCOPY_SMALL_BITS
+#endif
+#ifndef FASTBITCOPY_SMALL_BITS_UNALIGNED
+#define FASTBITCOPY_SMALL_BITS_UNALIGNED FASTBITCOPY_SMALL_BITS
+#endif
+#endif
+#ifndef FASTBITCOPY_SMALL_BITS_ALIGNED
+#define FASTBITCOPY_SMALL_BITS_ALIGNED 32
+#endif
+#ifndef FASTBITCOPY_SMALL_BITS_UNALIGNED
+#define FASTBITCOPY_SMALL_BITS_UNALIGNED 256
 #endif
 
 // Our optimized bit copy entry point.
 void FastBitCopy(uint8 *Dest, int32 DestBit, uint8 *Src, int32 SrcBit, int32 BitCount)
 {
+	// Classify alignment before normalising DestBit/SrcBit: the aligned
+	// path is taken iff (SrcBit - DestBit) is a multiple of 8, i.e. the
+	// two bit streams share the same intra-byte phase. This is the exact
+	// condition under which BitsCopyFastAligned applies.
+	const bool bAligned = (((SrcBit - DestBit) & 7) == 0);
+	const int SmallBits = bAligned
+							  ? int(FASTBITCOPY_SMALL_BITS_ALIGNED)
+							  : int(FASTBITCOPY_SMALL_BITS_UNALIGNED);
+
 	// Small-size shortcut: the original routine wins for tiny payloads.
 	// Inlined because OriginalAppBitsCpyImpl is FORCEINLINE and lives in the
 	// same TU. Note: this must use the *raw* Dest/DestBit/Src/SrcBit since
 	// OriginalAppBitsCpyImpl normalises them itself.
-	if (BitCount <= FASTBITCOPY_SMALL_BITS)
+	if (BitCount <= SmallBits)
 	{
 		OriginalAppBitsCpyImpl(Dest, DestBit, Src, SrcBit, BitCount);
 		return;
