@@ -12,6 +12,9 @@ Saved/
 # ---- CI standalone harness build output ----
 CI/build/
 CI/build-*/
+# Repo-root build dirs from ad-hoc local runs (cmake -B build-* at repo root)
+/build/
+/build-*/
 
 # ---- Editor / IDE ----
 .vs/

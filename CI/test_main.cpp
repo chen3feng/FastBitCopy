@@ -9,11 +9,52 @@
 #include "FastBitCopy.h"
 
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <random>
 #include <vector>
+
+// ---------------------------------------------------------------------------
+// Anti-DCE / anti-hoist barriers for the micro-benchmark loops.
+//
+// Without these, an optimizing compiler is free to notice that each iteration
+// of the bench loop writes to the same destination buffer with the same
+// arguments and keep only a single invocation (or worse, elide the writes
+// entirely because the buffer is never read afterwards). That used to show
+// up in our sweep as a flat `Fast_ns ~ 4.4` column across payload sizes on
+// Linux/g++ builds.
+//
+// Design:
+//   FBC_CLOBBER()     - memory barrier, tells the compiler that all memory
+//                       may have changed so prior stores must be emitted.
+//   FBC_DONOTOPT(x)   - make `x` observably escape, so `x` (and everything
+//                       feeding it) cannot be dead-code-eliminated.
+//
+// GCC/Clang: use the standard `asm volatile("" ::: "memory")` idiom which
+// costs zero instructions at runtime but prevents reordering/DCE.
+//
+// MSVC: has no equivalent inline asm on x64. We keep FBC_CLOBBER() empty and
+// instead rely on (a) rolling the Src/Dst offset every iteration so distinct
+// stores cannot be coalesced, plus (b) a volatile-sink write at loop exit so
+// the final buffer state is observably escaped. The sink write costs ~1 ns
+// but happens only once per bench run, not per iteration.
+#if defined(__GNUC__) || defined(__clang__)
+#define FBC_CLOBBER() asm volatile("" ::: "memory")
+#define FBC_DONOTOPT(x) asm volatile("" : "+r,m"(x) : : "memory")
+#else
+namespace
+{
+    volatile int FBC_Sink = 0;
+}
+#define FBC_CLOBBER() ((void)0)
+#define FBC_DONOTOPT(x)                                                     \
+    do                                                                      \
+    {                                                                       \
+        FBC_Sink = static_cast<int>(reinterpret_cast<std::intptr_t>(&(x))); \
+    } while (0)
+#endif
 
 namespace
 {
@@ -190,16 +231,38 @@ void RunBench(std::mt19937& Rng)
     const int kCopyBytes = 1024;
     const int kCopyBits  = kCopyBytes * 8;
 
+    // Roll the Src/Dst pointer each iteration in 8-byte steps so
+    //   (a) the compiler cannot coalesce successive stores (each targets a
+    //       different address), and
+    //   (b) SrcBit/DestBit alignment is preserved because off % 8 == 0.
+    // Range: buffer is 4224 B, payload is 1024 B. We cap the offset so
+    // off + payload + slack <= buffer, and round down to a power of two for
+    // a cheap `& mask`.
+    const int kBenchSlack = 16;
+    int BenchMaxOff = kBufferBytes - kCopyBytes - kBenchSlack;
+    int BenchRollMask = 8;
+    while ((BenchRollMask << 1) <= BenchMaxOff)
+        BenchRollMask <<= 1;
+    BenchRollMask = (BenchRollMask - 1) & ~7;
+
     auto Bench = [&](const char* Label, void(*Fn)(uint8*, int32, uint8*, int32, int32), int DestBit, int SrcBit)
     {
         // Warm up.
         for (int i = 0; i < 64; ++i)
-            Fn(B.DstFast.data(), DestBit, B.Src.data(), SrcBit, kCopyBits);
+        {
+            const int off = (i * 8) & BenchRollMask;
+            Fn(B.DstFast.data() + off, DestBit, B.Src.data() + off, SrcBit, kCopyBits);
+        }
 
         auto t0 = clock::now();
         for (int i = 0; i < kIters; ++i)
-            Fn(B.DstFast.data(), DestBit, B.Src.data(), SrcBit, kCopyBits);
+        {
+            const int off = (i * 8) & BenchRollMask;
+            Fn(B.DstFast.data() + off, DestBit, B.Src.data() + off, SrcBit, kCopyBits);
+            FBC_CLOBBER();
+        }
         auto t1 = clock::now();
+        FBC_DONOTOPT(B.DstFast[0]);
         double ns = std::chrono::duration<double, std::nano>(t1 - t0).count() / kIters;
         std::printf("  %-24s  %8.1f ns/op\n", Label, ns);
     };
@@ -291,15 +354,39 @@ namespace
         const int kIters = 100000;
 
         // Measure ns/op for a given (DestBit, SrcBit, BitCount) combination.
+        //
+        // Rolling offset + FBC_CLOBBER() + FBC_DONOTOPT() keep the optimizer
+        // honest: without them, Clang/GCC at -O2/-O3 happily observe that
+        // every iteration writes the exact same bits to the exact same
+        // location and delete all but one invocation, producing a flat
+        // ~4 ns/op "Fast" column that has nothing to do with real cost.
         auto MeasureNs = [&](auto fn, int DestBit, int SrcBit, int BitCount) -> double
         {
+            // Compute a safe rolling window for this payload. We need room
+            // for (BitCount bits, rounded up to bytes) + one 8-byte slack
+            // (the fast path over-reads up to one uint64 past the end).
+            const int PayloadBytes = (BitCount + 7) / 8 + 8;
+            const int MaxOff = kBufferBytes - PayloadBytes;
+            int RollMask = 8;
+            while ((RollMask << 1) <= MaxOff)
+                RollMask <<= 1;
+            RollMask = (RollMask - 1) & ~7; // 8-byte steps preserve bit alignment
+
             // Warm up.
             for (int i = 0; i < 256; ++i)
-                fn(B.DstFast.data(), DestBit, B.Src.data(), SrcBit, BitCount);
+            {
+                const int off = (i * 8) & RollMask;
+                fn(B.DstFast.data() + off, DestBit, B.Src.data() + off, SrcBit, BitCount);
+            }
             auto t0 = clock::now();
             for (int i = 0; i < kIters; ++i)
-                fn(B.DstFast.data(), DestBit, B.Src.data(), SrcBit, BitCount);
+            {
+                const int off = (i * 8) & RollMask;
+                fn(B.DstFast.data() + off, DestBit, B.Src.data() + off, SrcBit, BitCount);
+                FBC_CLOBBER();
+            }
             auto t1 = clock::now();
+            FBC_DONOTOPT(B.DstFast[0]);
             return std::chrono::duration<double, std::nano>(t1 - t0).count() / kIters;
         };
 
