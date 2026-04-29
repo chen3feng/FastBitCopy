@@ -143,24 +143,51 @@ bool FFastBitCopyPageBound::RunTest(const FString& Parameters)
 
 // ----------------------------------------------------------------------------
 // Speed benchmark.
+//
+// Methodology notes (don't regress these):
+//
+//  * Src buffer is (BytesSize + 8) bytes long, because the fast path may
+//    issue an unaligned 64-bit load up to one word past the nominal end
+//    (bounded inside CopyBitsSrcAligned but still past BytesSize when the
+//    caller only allocated BytesSize). Under-sized Src was UB and, more
+//    importantly, biased the benchmark because stack padding is
+//    unpredictable across compilers.
+//
+//  * We accumulate a byte of Dest into a volatile sink after each inner
+//    batch. Without this the optimiser is free to hoist/DCE the call
+//    (the result is never observed), which makes Fast look artificially
+//    good on small sizes where the call is trivially inlinable.
+//
+//  * We run a warm-up pass (to seed I-cache / branch predictors / TLB)
+//    and then take the minimum of several timed repeats. Minimum is the
+//    right statistic for micro-benchmarks: it's the sample least
+//    contaminated by OS preemption, turbo-boost transitions and
+//    interrupts. Mean/median bias upward with noise.
 // ----------------------------------------------------------------------------
 enum EBitsCopyType { Original, Hooked, Fast };
 enum EAlignment    { Aligned, Unaligned };
 
+// Volatile sink: observed side-effect to keep the optimiser from eliding
+// the benchmarked calls. `volatile` forces an actual store per write.
+static volatile uint8 GBenchSink = 0;
+
+// Number of timed repeats per (size, impl, alignment) tuple. We report the
+// minimum. Keep small to bound total test time.
+static constexpr int BenchRepeats = 5;
+
 template <int BytesSize, EBitsCopyType Type, EAlignment Alignment>
-static double BenchOne(int LoopCount)
+FORCENOINLINE static double BenchOneRun(int LoopCount)
 {
 	const bool IsAligned = (Alignment == Aligned);
-	const TCHAR* AlignName = IsAligned ? TEXT("Aligned  ") : TEXT("Unaligned");
-	const TCHAR* FuncName =
-		Type == Original ? TEXT("Original") :
-		Type == Hooked   ? TEXT("Hooked  ") :
-		                   TEXT("Fast    ");
 
 	uint8 Dest[BytesSize]; FMemory::Memset(Dest, 0, sizeof(Dest));
-	uint8 Src[1] = { 0xFF };
+	// +8 so the fast path's unaligned uint64 reads never walk off the end.
+	uint8 Src[BytesSize + 8];
+	for (int i = 0; i < (int)sizeof(Src); ++i)
+		Src[i] = (uint8)(i * 131 + 7);
 	constexpr int Bits = BytesSize * 8;
 
+	uint8 SinkAccum = 0;
 	const double StartTime = FPlatformTime::Seconds();
 	for (int i = 0; i < LoopCount; ++i)
 	{
@@ -183,11 +210,37 @@ static double BenchOne(int LoopCount)
 			else
 				FastBitCopy(Dest, 0, Src, 1, Bits - 1);
 		}
+		// Observe a byte so the call can't be eliminated as dead.
+		SinkAccum = (uint8)(SinkAccum ^ Dest[0]);
 	}
 	const double Elapsed = FPlatformTime::Seconds() - StartTime;
-	UE_LOG(LogFastBitCopyTests, Display,
-		   TEXT("  %s %s %d bytes : %.4f s"), FuncName, AlignName, BytesSize, Elapsed);
+	GBenchSink = SinkAccum; // publish
 	return Elapsed;
+}
+
+template <int BytesSize, EBitsCopyType Type, EAlignment Alignment>
+static double BenchOne(int LoopCount)
+{
+	const bool IsAligned = (Alignment == Aligned);
+	const TCHAR *AlignName = IsAligned ? TEXT("Aligned  ") : TEXT("Unaligned");
+	const TCHAR *FuncName =
+		Type == Original ? TEXT("Original") : Type == Hooked ? TEXT("Hooked  ")
+															 : TEXT("Fast    ");
+
+	// Warm-up: not timed. Seeds I-cache / branch predictors.
+	BenchOneRun<BytesSize, Type, Alignment>(FMath::Max(LoopCount / 10, 1));
+
+	double BestElapsed = TNumericLimits<double>::Max();
+	for (int r = 0; r < BenchRepeats; ++r)
+	{
+		const double E = BenchOneRun<BytesSize, Type, Alignment>(LoopCount);
+		if (E < BestElapsed)
+			BestElapsed = E;
+	}
+	UE_LOG(LogFastBitCopyTests, Display,
+		   TEXT("  %s %s %d bytes : %.4f s (min of %d)"),
+		   FuncName, AlignName, BytesSize, BestElapsed, BenchRepeats);
+	return BestElapsed;
 }
 
 // Benchmark result for a single size: holds Original and Fast timings.
@@ -204,7 +257,10 @@ struct FBenchResult
 template <int BytesSize>
 static FBenchResult BenchSize()
 {
-	constexpr int LoopCount = 1000000;
+	// Note: actual per-tuple runtime is ~BenchRepeats * LoopCount plus the
+	// 10% warmup. We keep LoopCount smaller than before (was 1,000,000) to
+	// keep the full Speed test inside the CI timeout budget.
+	constexpr int LoopCount = 200000;
 	UE_LOG(LogFastBitCopyTests, Display, TEXT("--- %d bytes ---"), BytesSize);
 
 	FBenchResult R;

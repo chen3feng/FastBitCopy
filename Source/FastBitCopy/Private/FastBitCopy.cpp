@@ -324,9 +324,34 @@ void OriginalAppBitsCpy(uint8 *Dest, int32 DestBit, uint8 *Src, int32 SrcBit, in
 	OriginalAppBitsCpyImpl(Dest, DestBit, Src, SrcBit, BitCount);
 }
 
+// Small-size shortcut threshold (in bits).
+//
+// Empirically the optimized path only beats the original at roughly >= 64 bits
+// (8 bytes) of payload. Below that, fixed per-call overhead (byte-align head,
+// FMemory::Memcpy tail, and in the unaligned case the CopyBitsSrcAligned<uint64>
+// setup) dominates, while the original appBitsCpy has a tight branch-free
+// short path for BitCount <= 8 and a lean shift loop for slightly larger sizes.
+//
+// For BitCount <= FASTBITCOPY_SMALL_BITS we therefore forward to the original
+// implementation (inlined here -- OriginalAppBitsCpyImpl is FORCEINLINE) so
+// that FastBitCopy is never slower than the stock routine.
+#ifndef FASTBITCOPY_SMALL_BITS
+#define FASTBITCOPY_SMALL_BITS 64
+#endif
+
 // Our optimized bit copy entry point.
 void FastBitCopy(uint8 *Dest, int32 DestBit, uint8 *Src, int32 SrcBit, int32 BitCount)
 {
+	// Small-size shortcut: the original routine wins for tiny payloads.
+	// Inlined because OriginalAppBitsCpyImpl is FORCEINLINE and lives in the
+	// same TU. Note: this must use the *raw* Dest/DestBit/Src/SrcBit since
+	// OriginalAppBitsCpyImpl normalises them itself.
+	if (BitCount <= FASTBITCOPY_SMALL_BITS)
+	{
+		OriginalAppBitsCpyImpl(Dest, DestBit, Src, SrcBit, BitCount);
+		return;
+	}
+
 	// Align to byte bound.
 	Dest += DestBit / 8;
 	DestBit %= 8;
