@@ -271,7 +271,22 @@ namespace
             V = static_cast<uint8>(ByteDist(Rng));
 
         // Candidate thresholds to sweep (in bits).
-        const int kThresholds[] = {8, 16, 32, 48, 64, 96, 128, 192, 256};
+        //
+        // 8..256 covers the "small payload" crossover region where the
+        // per-call overhead of the fast path might not pay off yet.
+        //
+        // 384..2048 covers the "medium / large" region we also care about
+        // for UE networking: Bunches are split at ~1024 bytes on send, so
+        // anything beyond ~2048 bits (256 B) is already well inside the
+        // fast path's comfort zone and doesn't add information.
+        //
+        // At these larger sizes the "Gated" column degenerates into the
+        // "Orig" column (payload <= thresh always takes the original
+        // path), so the useful signal there is the Orig_ns vs Fast_ns
+        // comparison, i.e. when does the unaligned fast path start to
+        // dominate the scalar original implementation.
+        const int kThresholds[] = {8, 16, 32, 48, 64, 96, 128, 192, 256,
+                                   384, 512, 768, 1024, 2048};
         // Iterations per measurement.
         const int kIters = 100000;
 
