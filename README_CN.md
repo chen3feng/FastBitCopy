@@ -167,6 +167,7 @@ FastBitCopy/
 ├── build_testhost.sh             # Linux/macOS 构建脚本
 ├── run_testhost.bat             # Windows 测试脚本（Editor + Game）
 ├── run_testhost.sh              # Linux/macOS 测试脚本（Editor + Game）
+├── run_sweep_wsl.ps1            # Windows 下通过 WSL 跑 Linux sweep（可选）
 ├── .env.example                  # ENGINE_ROOT 配置模板
 ├── Source/
 │   ├── FastBitCopy/              # 运行时模块（安装 Hook）
@@ -216,6 +217,48 @@ FastBitCopy/
 ```bash
 UnrealEditor-Cmd.exe <你的项目.uproject> -ExecCmds="Automation RunTests FastBitCopy" -unattended -NoPause
 ```
+
+## 复现基准测试
+
+上面 "为什么要做这个" 一节里的加速比数据，是在 Windows + 源码编译的
+UE5 上测得的；CI（`.github/workflows/ci.yml`）会在每种支持的编译器和
+操作系统上跑正确性测试，但**故意不把绝对吞吐量作为 gate**（CPU 因素
+波动过大）。如果你想在自己机器上复现或对比这些数字，有三个互相
+独立的入口：
+
+1. **UE Editor 里的 `FastBitCopy.Speed` 自动化测试** —— 在真实的 UE
+   工程里跑，见上节。会分别测 stock `appBitsCpy` / Hook 路径 /
+   直接调 `FastBitCopy`，尺寸覆盖 1 B – 1 KiB。
+
+2. **独立 CI 测试程序** —— 不需要装 UE，只要有 CMake + C++ 编译器。
+   从仓库根目录：
+
+   ```bash
+   cmake -S CI -B CI/build -DCMAKE_BUILD_TYPE=Release
+   cmake --build CI/build -j
+   ./CI/build/fastbitcopy_ci
+   ```
+
+   这个二进制跑的是与 CI 同一套正确性套件，跑完会打印一张
+   `[sweep]` 表，遍历小尺寸阈值和字节 / bit 对齐组合 —— 这也是
+   我们拿来挑选内部快速路径阈值的数据来源。
+
+3. **WSL 便捷脚本 `run_sweep_wsl.ps1`** —— 给 Windows 开发者用：
+   不用离开 Windows 也能拿到一份 Linux/g++ 的数据点。脚本会把
+   仓库 rsync 到 WSL 的原生 ext4 下（`/mnt/e` 慢 5–10 倍且会让
+   CMake 出怪问题），apt 安装 `build-essential cmake rsync`，
+   然后在 `CI/` 下 Release 构建并运行 `fastbitcopy_ci`，同时把
+   输出 tee 到 `.agent/sweep-linux.log`：
+
+   ```powershell
+   # Windows PowerShell，在仓库根目录下
+   .\run_sweep_wsl.ps1                       # 自动挑第一个 WSL2 的 Ubuntu
+   .\run_sweep_wsl.ps1 -SkipDepsInstall      # 改完源码重跑（已装过依赖）
+   .\run_sweep_wsl.ps1 -Distro Ubuntu-24.04  # 指定具体发行版
+   ```
+
+   脚本**不会**修改 Windows 这边的工作区 —— 它只把 Windows 同步到
+   WSL，不做反向同步。
 
 ## API
 
