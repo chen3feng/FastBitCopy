@@ -122,7 +122,14 @@ echo [SKIP] UnrealEditor-Cmd.exe not found - cannot run automation tests
     set /a FAILURES+=1
     goto :SkipEditorTest
 )
-"%EDITOR_CMD%" "%PROJECT%" -Run=Automation -TestCmds="RunTests FastBitCopy" -unattended -NoPause -NullRHI -nosound -nosplash -nop4 -NoSourceControl -log
+REM NOTE: We intentionally use -ExecCmds (not -Run=Automation) on Windows.
+REM The -Run=Automation commandlet path relies on UAutomationCommandlet being
+REM registered, which requires UnrealEd to have been loaded; under CI that
+REM class lookup fails with "AutomationCommandlet looked like a commandlet,
+REM but we could not find the class." The macOS Cocoa menu crash that forced
+REM -Run=Automation on Mac does not reproduce on Windows, so the interactive
+REM editor path (-ExecCmds) is both sufficient and known-good here.
+"%EDITOR_CMD%" "%PROJECT%" -ExecCmds="Automation RunTests FastBitCopy; Quit" -unattended -NoPause -NullRHI -nosound -nosplash -nop4 -NoSourceControl -log
 if errorlevel 1 (
     echo.
     echo [FAIL] Editor automation tests failed
@@ -153,6 +160,8 @@ goto :Summary
 REM ============================================================
 :EditorOnly
 REM ============================================================
+REM See the note in :RunAll above for why we use -ExecCmds, not -Run=Automation,
+REM on Windows.
 set "FAILURES=0"
 
 echo.
@@ -180,7 +189,7 @@ if not exist "%EDITOR_CMD%" (
     echo ERROR: UnrealEditor-Cmd.exe not found at %EDITOR_CMD%
     exit /b 1
 )
-"%EDITOR_CMD%" "%PROJECT%" -Run=Automation -TestCmds="RunTests FastBitCopy" -unattended -NoPause -NullRHI -nosound -nosplash -nop4 -NoSourceControl -log
+"%EDITOR_CMD%" "%PROJECT%" -ExecCmds="Automation RunTests FastBitCopy; Quit" -unattended -NoPause -NullRHI -nosound -nosplash -nop4 -NoSourceControl -log
 if errorlevel 1 (
     echo.
     echo [FAIL] Editor automation tests failed
@@ -236,7 +245,7 @@ if not exist "%EDITOR_CMD%" (
     echo ERROR: UnrealEditor-Cmd.exe not found at %EDITOR_CMD%
     exit /b 1
 )
-"%EDITOR_CMD%" "%PROJECT%" -Run=Automation -TestCmds="RunTests FastBitCopy" -unattended -NoPause -NullRHI -nosound -nosplash -nop4 -NoSourceControl -log
+"%EDITOR_CMD%" "%PROJECT%" -ExecCmds="Automation RunTests FastBitCopy; Quit" -unattended -NoPause -NullRHI -nosound -nosplash -nop4 -NoSourceControl -log
 if errorlevel 1 (
     echo.
     echo [FAIL] Editor automation tests failed
