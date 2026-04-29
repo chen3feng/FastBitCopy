@@ -171,6 +171,7 @@ FastBitCopy/
 ├── build_testhost.sh             # Linux/macOS build script
 ├── run_testhost.bat             # Windows test script (Editor + Game)
 ├── run_testhost.sh              # Linux/macOS test script (Editor + Game)
+├── run_sweep_wsl.ps1            # Windows: run Linux sweep via WSL (optional)
 ├── .env.example                  # ENGINE_ROOT configuration template
 ├── Source/
 │   ├── FastBitCopy/              # runtime module (installs the hook)
@@ -221,6 +222,51 @@ You can also run them from the command line:
 ```bash
 UnrealEditor-Cmd.exe <YourProject.uproject> -ExecCmds="Automation RunTests FastBitCopy" -unattended -NoPause
 ```
+
+## Reproducing the benchmarks
+
+The speed-up figures in the "Why" table were measured on Windows with a
+source build of UE 5; the CI job in `.github/workflows/ci.yml` exercises
+correctness on every supported compiler and OS but intentionally does
+not gate on absolute throughput. If you want to reproduce or compare
+the numbers on your own hardware, there are three independent entry
+points:
+
+1. **`FastBitCopy.Speed` automation test (UE Editor)** — from inside
+   a real UE project, see the table above. This measures the stock
+   `appBitsCpy`, the installed hook path, and the direct `FastBitCopy`
+   entry point at sizes 1 B – 1 KiB.
+
+2. **Standalone CI harness** — no UE install needed. From a clean
+   checkout:
+
+   ```bash
+   cmake -S CI -B CI/build -DCMAKE_BUILD_TYPE=Release
+   cmake --build CI/build -j
+   ./CI/build/fastbitcopy_ci
+   ```
+
+   The binary runs the same correctness suite as CI and then prints a
+   `[sweep]` table that walks the small-size threshold and byte-vs-bit
+   alignment combinations — this is what was used to pick the internal
+   fast-path cutoffs.
+
+3. **WSL wrapper (`run_sweep_wsl.ps1`)** — convenience script for
+   Windows developers who want a Linux/g++ data point without leaving
+   Windows. It rsyncs the repo into the distro's native ext4
+   (`/mnt/e` is ~5-10× slower and confuses CMake), installs
+   `build-essential cmake rsync`, then builds `CI/` and runs
+   `fastbitcopy_ci`, tee-ing the output to `.agent/sweep-linux.log`:
+
+   ```powershell
+   # Windows PowerShell, from the repo root
+   .\run_sweep_wsl.ps1                       # auto-picks first WSL2 Ubuntu
+   .\run_sweep_wsl.ps1 -SkipDepsInstall      # repeat runs after a source edit
+   .\run_sweep_wsl.ps1 -Distro Ubuntu-24.04  # pin a specific distro
+   ```
+
+   The script never modifies the Windows working tree — it syncs
+   *from* Windows *to* WSL only.
 
 ## API
 
