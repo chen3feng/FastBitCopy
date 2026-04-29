@@ -122,7 +122,7 @@ echo [SKIP] UnrealEditor-Cmd.exe not found - cannot run automation tests
     set /a FAILURES+=1
     goto :SkipEditorTest
 )
-"%EDITOR_CMD%" "%PROJECT%" -ExecCmds="Automation RunTests FastBitCopy" -unattended -NoPause -NullRHI -log
+"%EDITOR_CMD%" "%PROJECT%" -Run=Automation -TestCmds="RunTests FastBitCopy" -unattended -NoPause -NullRHI -nosound -nosplash -nop4 -NoSourceControl -log
 if errorlevel 1 (
     echo.
     echo [FAIL] Editor automation tests failed
@@ -180,7 +180,7 @@ if not exist "%EDITOR_CMD%" (
     echo ERROR: UnrealEditor-Cmd.exe not found at %EDITOR_CMD%
     exit /b 1
 )
-"%EDITOR_CMD%" "%PROJECT%" -ExecCmds="Automation RunTests FastBitCopy" -unattended -NoPause -NullRHI -log
+"%EDITOR_CMD%" "%PROJECT%" -Run=Automation -TestCmds="RunTests FastBitCopy" -unattended -NoPause -NullRHI -nosound -nosplash -nop4 -NoSourceControl -log
 if errorlevel 1 (
     echo.
     echo [FAIL] Editor automation tests failed
@@ -236,7 +236,7 @@ if not exist "%EDITOR_CMD%" (
     echo ERROR: UnrealEditor-Cmd.exe not found at %EDITOR_CMD%
     exit /b 1
 )
-"%EDITOR_CMD%" "%PROJECT%" -ExecCmds="Automation RunTests FastBitCopy" -unattended -NoPause -NullRHI -log
+"%EDITOR_CMD%" "%PROJECT%" -Run=Automation -TestCmds="RunTests FastBitCopy" -unattended -NoPause -NullRHI -nosound -nosplash -nop4 -NoSourceControl -log
 if errorlevel 1 (
     echo.
     echo [FAIL] Editor automation tests failed

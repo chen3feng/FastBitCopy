@@ -125,9 +125,20 @@ if [[ "${TARGET_TYPE_LOWER}" == "test" ]]; then
     mkdir -p "${REPORT_DIR}"
 
     # Common flags for headless automation.
+    #
+    # We run tests via the Automation *commandlet* (-Run=Automation) rather than
+    # -ExecCmds=. The commandlet path drives UCommandlet::Main and never enters
+    # FEngineLoop::Tick / Slate tick / the Cocoa main-menu sync loop. This is
+    # what avoids the known macOS crash inside
+    #   FSlateMacMenu::UpdateWithMultiBox
+    # (an async NSRunLoop source0 block firing on a TSharedPtr<FMultiBox> that
+    # has already been destroyed during editor shutdown). The crash is a UE
+    # engine-side issue, not a FastBitCopy issue; -Run=Automation sidesteps it
+    # entirely because the menu-sync path is never armed.
+    #
     # -NullRHI / -nosound / -nosplash keep us off all UI/audio subsystems.
-    # On macOS this also dodges a known crash in FSlateMacMenu::UpdateWithMultiBox
-    # (Cocoa main-menu sync on a dangling TSharedPtr) that surfaces in commandlet mode.
+    # -nop4 / -NoSourceControl stop the editor from trying Perforce/Git login.
+    # -unattended / -NoPause keep the process non-interactive on CI.
     COMMON_FLAGS=(
         -unattended
         -NoPause
@@ -139,15 +150,17 @@ if [[ "${TARGET_TYPE_LOWER}" == "test" ]]; then
         -log
     )
 
-    # Disable Mac's Cocoa main menu rebuild path where supported; harmless on Linux.
+    # On macOS, also skip Slate renderer construction. Combined with the
+    # commandlet launch path above this gives belt-and-braces protection
+    # against FSlateMacMenu touching any TSharedPtr owned by the editor UI.
     if [[ "${PLATFORM}" == "Mac" ]]; then
         COMMON_FLAGS+=( -NoSlateRenderer )
     fi
 
     set +e
     "${EDITOR_CMD}" "${PROJECT}" \
-        -ExecCmds="Automation RunTests FastBitCopy; Quit" \
-        -TestExit="Automation Test Queue Empty" \
+        -Run=Automation \
+        -TestCmds="RunTests FastBitCopy" \
         -ReportExportPath="${REPORT_DIR}" \
         "${COMMON_FLAGS[@]}"
     TEST_EXIT=$?
