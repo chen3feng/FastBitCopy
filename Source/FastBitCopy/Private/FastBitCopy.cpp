@@ -370,6 +370,34 @@ void FastBitCopy(uint8 *Dest, int32 DestBit, uint8 *Src, int32 SrcBit, int32 Bit
 // we're on the optimized path, not the fallback).
 int FastBitCopy_IsOptimizedBuild() { return 1; }
 
+// ---------------------------------------------------------------------------
+// Internal function wrappers for threshold sweep benchmarking.
+//
+// Only compiled when FASTBITCOPY_EXPOSE_INTERNALS is defined (set by the CI
+// CMake build). Never enabled in production UE plugin builds.
+// ---------------------------------------------------------------------------
+#if FASTBITCOPY_EXPOSE_INTERNALS
+
+// Raw aligned fast path (after byte-alignment normalisation).
+void FastBitCopy_Internal_Aligned(uint8 *Dest, uint8 *Src, int BitOffset, int BitCount)
+{
+	BitsCopyFastAligned(Dest, Src, BitOffset, BitCount);
+}
+
+// Raw unaligned fast path (after byte-alignment normalisation).
+void FastBitCopy_Internal_Unaligned(uint8 *Dest, int DestBit, uint8 *Src, int SrcBit, int BitCount)
+{
+	BitsCopyFastUnaligned(Dest, DestBit, Src, SrcBit, BitCount);
+}
+
+// Raw original implementation (FORCEINLINE, same TU).
+void FastBitCopy_Internal_Original(uint8 *Dest, int32 DestBit, uint8 *Src, int32 SrcBit, int32 BitCount)
+{
+	OriginalAppBitsCpyImpl(Dest, DestBit, Src, SrcBit, BitCount);
+}
+
+#endif // FASTBITCOPY_EXPOSE_INTERNALS
+
 #else // !PLATFORM_LITTLE_ENDIAN
 
 // Fallback: just forward to UE's implementation by declaring it and calling through.

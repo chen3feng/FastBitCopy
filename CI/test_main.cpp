@@ -215,6 +215,151 @@ void RunBench(std::mt19937& Rng)
 
 } // namespace
 
+#if FASTBITCOPY_EXPOSE_INTERNALS
+
+// Forward declarations for the internal wrappers exposed by FastBitCopy.cpp
+// when FASTBITCOPY_EXPOSE_INTERNALS is defined.
+// NOTE: these must be declared at global scope (outside any anonymous namespace)
+// to match the definitions in FastBitCopy.cpp.
+void FastBitCopy_Internal_Aligned(uint8 *Dest, uint8 *Src, int BitOffset, int BitCount);
+void FastBitCopy_Internal_Unaligned(uint8 *Dest, int DestBit, uint8 *Src, int SrcBit, int BitCount);
+void FastBitCopy_Internal_Original(uint8 *Dest, int32 DestBit, uint8 *Src, int32 SrcBit, int32 BitCount);
+
+namespace
+{
+
+    // Simulate FastBitCopy with a custom small-size threshold (in bits).
+    // Below the threshold: forward to OriginalAppBitsCpyImpl (via the exposed wrapper).
+    // At or above: use the fast aligned/unaligned path directly.
+    static void FastBitCopyWithThreshold(uint8 *Dest, int32 DestBit, uint8 *Src, int32 SrcBit, int32 BitCount,
+                                         int32 SmallBitsThreshold)
+    {
+        if (BitCount <= SmallBitsThreshold)
+        {
+            FastBitCopy_Internal_Original(Dest, DestBit, Src, SrcBit, BitCount);
+            return;
+        }
+        // Normalise to byte boundary (mirrors FastBitCopy's own prelude).
+        Dest += DestBit / 8;
+        DestBit %= 8;
+        Src += SrcBit / 8;
+        SrcBit %= 8;
+        if (SrcBit == DestBit)
+            FastBitCopy_Internal_Aligned(Dest, Src, SrcBit, BitCount);
+        else
+            FastBitCopy_Internal_Unaligned(Dest, DestBit, Src, SrcBit, BitCount);
+    }
+
+    // Threshold sweep benchmark.
+    //
+    // For each candidate threshold value, measures the time to copy payloads of
+    // exactly (threshold - 1), threshold, and (threshold + 1) bits under both
+    // aligned and unaligned conditions, comparing:
+    //   - "Orig"  : always use OriginalAppBitsCpyImpl
+    //   - "Fast"  : always use the fast path (no threshold guard, threshold=0)
+    //   - "Gated" : use FastBitCopyWithThreshold(threshold)
+    //
+    // The output table lets you pick the crossover point where "Gated" stops
+    // being slower than "Orig" for both aligned and unaligned cases.
+    void RunBenchSweep(std::mt19937 &Rng)
+    {
+        using clock = std::chrono::steady_clock;
+
+        Buffers B;
+        std::uniform_int_distribution<int> ByteDist(0, 255);
+        for (auto &V : B.Src)
+            V = static_cast<uint8>(ByteDist(Rng));
+
+        // Candidate thresholds to sweep (in bits).
+        //
+        // 8..256 covers the "small payload" crossover region where the
+        // per-call overhead of the fast path might not pay off yet.
+        //
+        // 384..2048 covers the "medium / large" region we also care about
+        // for UE networking: Bunches are split at ~1024 bytes on send, so
+        // anything beyond ~2048 bits (256 B) is already well inside the
+        // fast path's comfort zone and doesn't add information.
+        //
+        // At these larger sizes the "Gated" column degenerates into the
+        // "Orig" column (payload <= thresh always takes the original
+        // path), so the useful signal there is the Orig_ns vs Fast_ns
+        // comparison, i.e. when does the unaligned fast path start to
+        // dominate the scalar original implementation.
+        const int kThresholds[] = {8, 16, 32, 48, 64, 96, 128, 192, 256,
+                                   384, 512, 768, 1024, 2048};
+        // Iterations per measurement.
+        const int kIters = 100000;
+
+        // Measure ns/op for a given (DestBit, SrcBit, BitCount) combination.
+        auto MeasureNs = [&](auto fn, int DestBit, int SrcBit, int BitCount) -> double
+        {
+            // Warm up.
+            for (int i = 0; i < 256; ++i)
+                fn(B.DstFast.data(), DestBit, B.Src.data(), SrcBit, BitCount);
+            auto t0 = clock::now();
+            for (int i = 0; i < kIters; ++i)
+                fn(B.DstFast.data(), DestBit, B.Src.data(), SrcBit, BitCount);
+            auto t1 = clock::now();
+            return std::chrono::duration<double, std::nano>(t1 - t0).count() / kIters;
+        };
+
+        std::printf("\n[sweep] Small-size threshold sweep (%d iters each)\n", kIters);
+        std::printf("  %-9s  %-12s  %-8s  %8s  %8s  %9s  %10s  %10s\n",
+                    "Thresh", "PayloadBits", "Align", "Orig_ns", "Fast_ns", "Gated_ns", "Orig/Gated", "Fast/Gated");
+        std::printf("  %.*s\n", 85, "---------------------"
+                                    "---------------------"
+                                    "---------------------"
+                                    "---------------------"
+                                    "-----");
+
+        for (int thresh : kThresholds)
+        {
+            // Test three payload sizes around the threshold.
+            const int payloads[] = {thresh - 1, thresh, thresh + 1};
+            for (int bits : payloads)
+            {
+                if (bits <= 0)
+                    continue;
+
+                // Aligned: DestBit == SrcBit == 3
+                {
+                    int db = 3, sb = 3;
+                    double origNs = MeasureNs([](uint8 *d, int db2, uint8 *s, int sb2, int bc)
+                                              { FastBitCopy_Internal_Original(d, db2, s, sb2, bc); }, db, sb, bits);
+                    double fastNs = MeasureNs([&](uint8 *d, int db2, uint8 *s, int sb2, int bc)
+                                              { FastBitCopyWithThreshold(d, db2, s, sb2, bc, 0); }, db, sb, bits);
+                    double gatedNs = MeasureNs([&](uint8 *d, int db2, uint8 *s, int sb2, int bc)
+                                               { FastBitCopyWithThreshold(d, db2, s, sb2, bc, thresh); }, db, sb, bits);
+                    std::printf("  %-9d  %-12d  %-8s  %8.1f  %8.1f  %9.1f  %10.2fx  %10.2fx\n",
+                                thresh, bits, "aligned",
+                                origNs, fastNs, gatedNs,
+                                origNs / gatedNs, fastNs / gatedNs);
+                }
+                // Unaligned: DestBit=5, SrcBit=1
+                {
+                    int db = 5, sb = 1;
+                    double origNs = MeasureNs([](uint8 *d, int db2, uint8 *s, int sb2, int bc)
+                                              { FastBitCopy_Internal_Original(d, db2, s, sb2, bc); }, db, sb, bits);
+                    double fastNs = MeasureNs([&](uint8 *d, int db2, uint8 *s, int sb2, int bc)
+                                              { FastBitCopyWithThreshold(d, db2, s, sb2, bc, 0); }, db, sb, bits);
+                    double gatedNs = MeasureNs([&](uint8 *d, int db2, uint8 *s, int sb2, int bc)
+                                               { FastBitCopyWithThreshold(d, db2, s, sb2, bc, thresh); }, db, sb, bits);
+                    std::printf("  %-9d  %-12d  %-8s  %8.1f  %8.1f  %9.1f  %10.2fx  %10.2fx\n",
+                                thresh, bits, "unalign",
+                                origNs, fastNs, gatedNs,
+                                origNs / gatedNs, fastNs / gatedNs);
+                }
+            }
+        }
+        std::printf("\n  Interpretation:\n");
+        std::printf("    Orig/Gated > 1.0 => gated is faster than always-original (good)\n");
+        std::printf("    Fast/Gated > 1.0 => gated is faster than always-fast (expected for small payloads)\n");
+        std::printf("    Ideal threshold: smallest value where Orig/Gated >= 1.0 for both aligned and unaligned.\n\n");
+    }
+
+} // namespace
+
+#endif // FASTBITCOPY_EXPOSE_INTERNALS
 // Forward declaration for the probe defined in FastBitCopy.cpp.
 int FastBitCopy_IsOptimizedBuild();
 
@@ -286,5 +431,8 @@ int main()
     std::mt19937 Rng(0xC0FFEEu);
     int rc = RunCorrectness(Rng);
     RunBench(Rng);
+#if FASTBITCOPY_EXPOSE_INTERNALS
+    RunBenchSweep(Rng);
+#endif
     return rc;
 }

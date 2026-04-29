@@ -26,6 +26,11 @@ target_include_directories(fastbitcopy_ci PRIVATE
     "${PLUGIN_ROOT}/Source/FastBitCopy/Public"
 )
 
+# Expose internal functions (BitsCopyFastAligned/Unaligned, OriginalAppBitsCpyImpl)
+# for the threshold sweep benchmark. This flag is ONLY set in the CI standalone
+# build; the UE plugin build never sees it.
+target_compile_definitions(fastbitcopy_ci PRIVATE FASTBITCOPY_EXPOSE_INTERNALS=1)
+
 # Force-include ue_shim.h ahead of anything so UE types & macros are defined
 # before the plugin sources are parsed.
 if(MSVC)
