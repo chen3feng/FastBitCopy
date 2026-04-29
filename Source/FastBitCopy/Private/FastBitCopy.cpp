@@ -127,14 +127,51 @@ static void CopyBitsSrcAligned(WordType *Dest, int DestBit, WordType *Src, int B
 		{
 			const uint32 UDestBit = uint32(DestBit);
 			const uint32 UDestCopyBits = uint32(DestCopyBits);
+			// Pipelined shift-word loop.
+			//
+			// The natural formulation does 3 loads (Src[i], Dest[i], Dest[i+1])
+			// and 2 stores per iteration. But Dest[i] in iteration i already
+			// contains "Word_{i-1} >> UDestCopyBits" in its low DestBit bits,
+			// written by the previous iteration's store to Dest[i]. That write
+			// was itself fed by the read of the *original* Dest[i-1]'s low
+			// DestBit bits (via `D0 & ~Mask`). So across the whole loop only
+			// the low DestBit bits of Dest[0] and the high DestCopyBits bits
+			// of Dest[LoopCount] ever matter as "original" Dest content; every
+			// other "Dest" read is recovering something we just wrote.
+			//
+			// We exploit that by carrying a single `Overflow` register across
+			// iterations:
+			//   - Overflow's low DestBit bits always hold the bits that belong
+			//     in the low DestBit bits of the next Dest[i] to be written.
+			//   - Bootstrap: read Dest[0]'s low DestBit bits once before the
+			//     loop.
+			//   - After writing Dest[i], update Overflow = Word >> UDestCopyBits,
+			//     which is exactly "Word's high DestCopyBits bits, sitting in
+			//     the low DestCopyBits bit positions" -- i.e. what belongs in
+			//     the low part of Dest[i+1]. (The low DestBit bits of Dest[i+1]'s
+			//     *original* value don't need to be preserved: they get
+			//     overwritten by Word_{i+1} << UDestBit in the next store,
+			//     exactly as in the unpipelined version.)
+			//   - Tail-up: after LoopCount iterations, Overflow still holds the
+			//     high bits of Word_{LoopCount-1}, which must go into the low
+			//     DestCopyBits bits of Dest[LoopCount]. Merge with the
+			//     (untouched) high DestBit bits of the original Dest[LoopCount].
+			//
+			// Net I/O per iteration: 1 Src load + 1 Dest store. Outside the
+			// loop: 2 loads + 1 store total. Roughly half the memory traffic
+			// of the original shape on the hot path.
+			WordType Overflow = WordType(LoadWordUnaligned(&Dest[0]) & ~Mask);
 			for (int i = 0; i < LoopCount; ++i)
 			{
 				const WordType Word = LoadWordUnaligned(&Src[i]);
-				const WordType D0 = LoadWordUnaligned(&Dest[i]);
-				const WordType D1 = LoadWordUnaligned(&Dest[i + 1]);
-				StoreWordUnaligned(&Dest[i], WordType((D0 & ~Mask) | WordType(Word << UDestBit)));
-				StoreWordUnaligned(&Dest[i + 1], WordType((D1 & Mask) | WordType(Word >> UDestCopyBits)));
+				StoreWordUnaligned(&Dest[i], WordType(Overflow | WordType(Word << UDestBit)));
+				Overflow = WordType(Word >> UDestCopyBits);
 			}
+			// Merge the carried Overflow into Dest[LoopCount]'s low bits,
+			// preserving its original high DestBit bits. This is the exact
+			// final state the old 2-store-per-iter loop left Dest[LoopCount] in.
+			const WordType DLast = LoadWordUnaligned(&Dest[LoopCount]);
+			StoreWordUnaligned(&Dest[LoopCount], WordType((DLast & Mask) | Overflow));
 		}
 		Src += LoopCount;
 		Dest += LoopCount;
