@@ -93,7 +93,28 @@ static FORCEINLINE void StoreWordUnaligned(WordType *P, WordType W)
 	std::memcpy(P, &W, sizeof(W));
 }
 
-// Copy bits with source bit offset aligned.
+// Copy bits when the Src side is byte-aligned (i.e. SrcBit == 0 at entry;
+// hence Src has no bit-offset parameter). Dest may still carry a bit
+// offset in DestBit.
+//
+// Naming note: "SrcAligned" here is strictly *single-sided* -- it does
+// NOT imply that Src and Dest share the same phase. The double-aligned
+// case (SrcBit == DestBit, possibly non-zero) is handled separately by
+// BitsCopyFastAligned and never reaches this function.
+//
+// Callers / entry states:
+//   1. BitsCopyFastUnaligned, after its leading-bit pass has normalised
+//      SrcBit to 0. On this path DestBit is guaranteed to be in [1, 7]:
+//      if it were 0 we'd have SrcBit == DestBit at the top-level entry,
+//      which would have been routed to BitsCopyFastAligned instead. So
+//      the DestBit == 0 branch below is *unreachable from here*.
+//   2. Tail recursion from the uint64 specialisation into the uint8
+//      specialisation (see the `sizeof(WordType) > 1` tail branch near
+//      the bottom of this function). The recursive call passes
+//      DestBit = originalDestBit % 8, which can legitimately be 0 when
+//      the uint64 middle loop finished exactly on a Dest byte boundary.
+//      This is the only path that actually exercises the DestBit == 0
+//      fast branch.
 template <typename WordType>
 static void CopyBitsSrcAligned(WordType *Dest, int DestBit, WordType *Src, int BitCount)
 {
@@ -116,6 +137,11 @@ static void CopyBitsSrcAligned(WordType *Dest, int DestBit, WordType *Src, int B
 		// otherwise perform (`Word >> DestCopyBits` with DestCopyBits ==
 		// BitsPerWord is UB in C/C++, and Clang/GCC do not silently fold it
 		// to zero the way MSVC does).
+		//
+		// Reachability: as noted in the function-level comment, this branch
+		// is only hit via the uint64 -> uint8 tail recursion (case 2). The
+		// direct call from BitsCopyFastUnaligned (case 1) always has
+		// DestBit in [1, 7] and takes the else branch below.
 		if (DestBit == 0)
 		{
 			for (int i = 0; i < LoopCount; ++i)
